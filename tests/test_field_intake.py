@@ -39,15 +39,15 @@ def test_empty_database_offers_registration(self):
     result=self.client.get('/field/nearby?latitude=23&longitude=72').json()
     self.assertEqual(result['nearby'],[]);self.assertEqual(result['unmapped'],[])
     html=self.client.get('/visits').text
-    self.assertIn('REGISTER NEW SALON / DISTRIBUTOR / ACADEMY',html)
+    self.assertIn('ADD NEW VISIT — REGISTER NEW BUSINESS',html)
     self.assertNotIn('Select Salon',html)
-    response=self.client.post('/field/start',data={**data,'business_name':'New Academy','phone':'999','client_type':'ACADEMY'},follow_redirects=False)
+    response=self.client.post('/field/start',data={**data,'business_name':'New Academy','phone':'999','client_type':'ACADEMY','address':'Test address','pincode':'380001','notes':'Discuss treatments'},follow_redirects=False)
     self.assertEqual(response.status_code,303)
     with SessionLocal() as db:
         c=db.query(Client).filter_by(business_name='New Academy').one()
         self.assertEqual((c.latitude,c.longitude,c.created_by,c.assigned_sales_id),(23,72,2,2))
         a=db.query(Activity).filter_by(client_id=c.id,activity_type='FIELD_VISIT').order_by(Activity.id.desc()).first()
-        self.assertEqual(a.status,'IN_PROGRESS')
+        self.assertEqual(a.status,'IN_PROGRESS');self.assertEqual(a.notes,'Discuss treatments');self.assertEqual(c.address,'Test address')
         v=db.query(Visit).filter_by(activity_id=a.id).one();self.assertIsNotNone(v.check_in_at)
 
 

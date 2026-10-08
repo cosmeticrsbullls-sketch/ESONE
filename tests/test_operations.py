@@ -51,6 +51,8 @@ class OperationsTests(unittest.TestCase):
         email={'manager':'manager@example.test','a':'a@example.test','b':'b@example.test'}[who]
         response=self.client.post('/login',data={'email':email,'password':'Test-only-password-123'},follow_redirects=False)
         self.assertEqual(response.status_code,303)
+        import re
+        self.csrf=re.search(r'name="csrf" value="([^"]+)"',self.client.get('/visits').text)[1]
 
     def workbook(self,response):
         self.assertEqual(response.status_code,200)
@@ -141,7 +143,7 @@ class OperationsTests(unittest.TestCase):
     def test_production_does_not_expose_or_queue_test_otp(self):
         self.login('a');self.client.post('/visits/6/start',data={'latitude':23,'longitude':72})
         with patch.dict(os.environ,{'ESONE_ENV':'production'}):
-            response=self.client.post('/visits/6/request-end-otp',data={'notes':'Visit done'})
+            response=self.client.post('/visits/6/request-end-otp',data={'notes':'Visit done','csrf':self.csrf})
         self.assertEqual(response.status_code,503);self.assertNotIn('TEST OTP',response.text)
         with SessionLocal() as db:self.assertEqual(db.query(VerificationOTP).count(),0)
 
@@ -149,10 +151,10 @@ class OperationsTests(unittest.TestCase):
         import re
         self.login('a');self.client.post('/visits/6/start',data={'latitude':23,'longitude':72})
         with patch.dict(os.environ,{'ESONE_ENV':'test'}):
-            response=self.client.post('/visits/6/request-end-otp',data={'notes':'Visit done'})
+            response=self.client.post('/visits/6/request-end-otp',data={'notes':'Visit done','csrf':self.csrf})
         code=re.search(r'TEST OTP: (\d+)',response.text).group(1)
-        self.assertEqual(self.client.post('/visits/6/verify-end-otp',data={'otp':code},follow_redirects=False).status_code,303)
-        self.assertEqual(self.client.post('/visits/6/verify-end-otp',data={'otp':code},follow_redirects=False).status_code,409)
+        self.assertEqual(self.client.post('/visits/6/verify-end-otp',data={'otp':code,'csrf':self.csrf},follow_redirects=False).status_code,303)
+        self.assertEqual(self.client.post('/visits/6/verify-end-otp',data={'otp':code,'csrf':self.csrf},follow_redirects=False).status_code,409)
         with SessionLocal() as db:
             self.assertEqual(db.get(Activity,6).status,'COMPLETED')
             self.assertEqual(db.get(Activity,6).notes,'Visit done')
