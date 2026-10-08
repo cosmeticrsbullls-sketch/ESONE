@@ -991,11 +991,13 @@ def visit_detail(activity_id:int, request:Request):
         if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
         gps_registered=c.latitude is not None and c.longitude is not None
         start_block='''<button onclick="startVisit()">VERIFY LOCATION & START VISIT</button><div id="geo"></div>''' if a.status=="CREATED" else ""
-        end_block='''<form method="post" action="/visits/%s/request-end-otp"><label>Outcome / Notes</label><input name="notes" style="width:100%%;padding:12px;margin:8px 0" required><button>SEND END OTP</button></form>'''%activity_id if a.status=="IN_PROGRESS" else ""
+        from modules.workflows import hidden
+        csrf_field=hidden(request)
+        end_block='''<form method="post" action="/visits/%s/request-end-otp">%s<label>Outcome / Notes</label><input name="notes" style="width:100%%;padding:12px;margin:8px 0" required><button>SEND END OTP</button></form>'''%(activity_id,csrf_field) if a.status=="IN_PROGRESS" else ""
         otp=db.query(VerificationOTP).filter(VerificationOTP.activity_id==activity_id,VerificationOTP.purpose=="VISIT_END",VerificationOTP.status=="PENDING").order_by(VerificationOTP.id.desc()).first()
         otp_block=''
         if otp:
-            otp_block=f'''<form method="post" action="/visits/{activity_id}/verify-end-otp"><h3>Customer End OTP</h3><input name="otp" inputmode="numeric" maxlength="6" required><button>VERIFY & COMPLETE</button></form>'''
+            otp_block=f'''<form method="post" action="/visits/{activity_id}/verify-end-otp">{csrf_field}<h3>Customer End OTP</h3><input name="otp" inputmode="numeric" maxlength="6" required><button>VERIFY & COMPLETE</button></form>'''
         register_note="Salon GPS not registered. Current verified location will be registered when visit starts." if not gps_registered else f"Registered GPS: {c.latitude:.5f}, {c.longitude:.5f} (allowed radius {VISIT_RADIUS_METERS}m)"
         return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Visit</title><style>body{{font-family:Arial;background:#f4f4f4;margin:0}}main{{max-width:650px;margin:auto;padding:22px}}.card{{background:#fff;padding:22px;border:1px solid #ddd;border-radius:14px}}button,input{{padding:13px;border-radius:8px;border:1px solid #bbb;margin:6px 0}}button{{background:#222;color:white;font-weight:bold}}.ok{{color:green}}</style></head><body><main><a href="/visits">← Visits</a><div class="card"><h2>{escape(str(v.visit_type))} VISIT</h2><h3>{escape(str(c.business_name))}</h3><p>Status: <b>{escape(str(a.status))}</b></p><p>Location: {register_note}</p>{start_block}{end_block}{otp_block}</div></main>
 <script>function startVisit(){{if(!navigator.geolocation){{alert('GPS not supported');return}};document.getElementById('geo').innerText='Getting location...';navigator.geolocation.getCurrentPosition(async p=>{{let f=new FormData();f.append('latitude',p.coords.latitude);f.append('longitude',p.coords.longitude);let r=await fetch('/visits/{activity_id}/start',{{method:'POST',body:f}});let t=await r.text();if(r.ok)location.reload();else document.getElementById('geo').innerHTML=t;}},e=>{{document.getElementById('geo').innerText='Location permission/GPS required: '+e.message}},{{enableHighAccuracy:true,timeout:15000}})}};</script></body></html>'''
@@ -1022,43 +1024,77 @@ def start_visit(activity_id:int,request:Request,latitude:float=Form(...),longitu
         db.add(AuditLog(user_id=request.session.get("user_id"),entity_type="VISIT",entity_id=v.id,action="START",new_value=f"distance_m={dist:.1f}"));db.commit();return HTMLResponse("OK")
     finally:db.close()
 
+def _visit_csrf(request, csrf):
+    if not csrf or not secrets.compare_digest(csrf, request.session.get("workflow_csrf", "")):
+        return HTMLResponse("Please reload the visit page and try again.",403)
+
+
 @app.post("/visits/{activity_id}/request-end-otp")
-def request_visit_end_otp(activity_id:int,request:Request,notes:str=Form("")):
+def request_visit_end_otp(activity_id:int,request:Request,notes:str=Form(""),csrf:str=Form("")):
+    from modules.otp_delivery import DeliveryError, send_otp, settings, test_mode
+    from modules.workflows import page
     if not request.session.get("user_id"):return RedirectResponse("/",303)
-    db=SessionLocal()
-    try:
-        a=db.query(Activity).filter(Activity.id==activity_id).first();v=db.query(Visit).filter(Visit.activity_id==activity_id).first()
+    with SessionLocal.begin() as db:
+        a=db.query(Activity).filter_by(id=activity_id).with_for_update().first()
+        v=db.query(Visit).filter_by(activity_id=activity_id).first()
         if not a or not v:return HTMLResponse("Visit not found",404)
         if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
+        denied=_visit_csrf(request,csrf)
+        if denied is not None:return denied
+        if a.status!="IN_PROGRESS":return HTMLResponse("Visit is not in progress",409)
+        if len(notes)>4000:return HTMLResponse("Visit notes are too long.",400)
         c=db.get(Client,a.client_id)
         if not c:return HTMLResponse("Client not found",404)
-        if os.getenv("ESONE_ENV") != "test":return HTMLResponse("Customer OTP delivery is not configured. Contact management; no OTP was sent.",503)
-        if a.status!="IN_PROGRESS":return HTMLResponse("Visit is not in progress",409)
+        is_test=test_mode()
+        if not is_test:
+            try:settings()
+            except DeliveryError as error:
+                return HTMLResponse(page("OTP connection required",f'<p>{escape(str(error))}</p><a href="/visits/{activity_id}">Back to visit</a>'),503)
+        recent=db.query(VerificationOTP).filter_by(activity_id=a.id,purpose="VISIT_END").order_by(VerificationOTP.id.desc()).first()
+        if recent and recent.created_at and recent.created_at>datetime.now()-timedelta(seconds=60):
+            return HTMLResponse("Please wait 60 seconds before requesting another OTP.",429)
         code=f"{secrets.randbelow(900000)+100000}"
-        otp=VerificationOTP(client_id=c.id,activity_id=a.id,purpose="VISIT_END",otp_hash=_otp_hash(code),recipient=c.whatsapp_phone or c.phone,status="PENDING",expires_at=datetime.now()+timedelta(minutes=10))
-        db.query(VerificationOTP).filter(VerificationOTP.activity_id==a.id,VerificationOTP.purpose=="VISIT_END",VerificationOTP.status=="PENDING").update({"status":"SUPERSEDED"})
-        a.notes=notes;db.add(otp)
-        db.add(CommunicationLog(client_id=c.id,activity_id=a.id,channel="WHATSAPP",purpose="VISIT_END_OTP",recipient=c.whatsapp_phone or c.phone,message_text="Visit completion verification OTP",send_mode="AUTO",status="QUEUED",created_by=request.session.get("user_id")))
-        db.commit()
-        # Until Meta WhatsApp API credentials are connected, expose a local test OTP so the workflow can be tested end-to-end.
-        return HTMLResponse(f'''<html><body style="font-family:Arial;padding:30px"><h2>OTP queued</h2><p>WhatsApp API is not connected yet.</p><p><b>TEST OTP: {code}</b> (valid 10 minutes)</p><a href="/visits/{activity_id}">Return to visit</a></body></html>''')
-    finally:db.close()
+        recipient=c.whatsapp_phone or c.phone
+        otp=VerificationOTP(client_id=c.id,activity_id=a.id,purpose="VISIT_END",otp_hash=_otp_hash(code),recipient=recipient,status="SENDING",expires_at=datetime.now()+timedelta(minutes=10))
+        db.add(otp);db.flush()
+        log=CommunicationLog(client_id=c.id,activity_id=a.id,channel="WHATSAPP",purpose="VISIT_END_OTP",recipient=recipient,message_text="Visit completion verification OTP",send_mode="AUTO",status="SENDING",created_by=request.session['user_id'])
+        db.add(log)
+        try:
+            message_id=None if is_test else send_otp(recipient,code)
+        except DeliveryError as error:
+            otp.status="FAILED";log.status="FAILED";log.failure_reason=str(error)
+            return HTMLResponse(page("OTP could not be sent",f'<p>{escape(str(error))}</p><a href="/visits/{activity_id}">Back to visit</a>'),502)
+        db.query(VerificationOTP).filter(VerificationOTP.activity_id==a.id,VerificationOTP.purpose=="VISIT_END",VerificationOTP.status=="PENDING",VerificationOTP.id!=otp.id).update({"status":"SUPERSEDED"})
+        otp.status="PENDING";a.notes=notes.strip() or a.notes
+        log.status="TEST" if is_test else "ACCEPTED";log.provider_message_id=message_id
+        test_text=f'<p><b>TEST OTP: {code}</b> (valid 10 minutes)</p>' if is_test else '<p>WhatsApp accepted the OTP request. Ask the customer to check their registered WhatsApp number, then enter the code on the visit page.</p>'
+        return HTMLResponse(page("Customer OTP",f'{test_text}<a href="/visits/{activity_id}">Enter OTP / return to visit</a>'))
+
 
 @app.post("/visits/{activity_id}/verify-end-otp")
-def verify_visit_end_otp(activity_id:int,request:Request,otp:str=Form(...)):
+def verify_visit_end_otp(activity_id:int,request:Request,otp:str=Form(...),csrf:str=Form("")):
     if not request.session.get("user_id"):return RedirectResponse("/",303)
-    db=SessionLocal()
-    try:
-        a=db.query(Activity).filter(Activity.id==activity_id).first();v=db.query(Visit).filter(Visit.activity_id==activity_id).first()
+    with SessionLocal.begin() as db:
+        a=db.query(Activity).filter_by(id=activity_id).with_for_update().first()
+        v=db.query(Visit).filter_by(activity_id=activity_id).first()
         if not a or not v:return HTMLResponse("Visit not found",404)
         if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
+        denied=_visit_csrf(request,csrf)
+        if denied is not None:return denied
         if a.status!="IN_PROGRESS":return HTMLResponse("Visit is not in progress",409)
-        rec=db.query(VerificationOTP).filter(VerificationOTP.activity_id==activity_id,VerificationOTP.purpose=="VISIT_END",VerificationOTP.status=="PENDING").order_by(VerificationOTP.id.desc()).first()
+        rec=db.query(VerificationOTP).filter_by(activity_id=activity_id,purpose="VISIT_END",status="PENDING").order_by(VerificationOTP.id.desc()).first()
         if not rec or rec.expires_at<datetime.now():return HTMLResponse("OTP expired. Request a new OTP.",409)
-        if rec.otp_hash!=_otp_hash(otp.strip()):return HTMLResponse("Invalid OTP",400)
+        attempts=db.query(AuditLog).filter_by(entity_type="VerificationOTP",entity_id=rec.id,action="OTP_INVALID").count()
+        if attempts>=5:
+            rec.status="LOCKED"
+            return HTMLResponse("Too many incorrect attempts. Request a new OTP.",429)
+        if not secrets.compare_digest(rec.otp_hash,_otp_hash(otp.strip())):
+            db.add(AuditLog(user_id=request.session['user_id'],entity_type="VerificationOTP",entity_id=rec.id,action="OTP_INVALID"))
+            if attempts+1>=5:rec.status="LOCKED"
+            return HTMLResponse("Invalid OTP. Check the customer code.",400)
         rec.status="VERIFIED";rec.verified_at=datetime.now();v.check_out_at=datetime.now();a.status="COMPLETED";a.completed_at=datetime.now()
-        db.add(AuditLog(user_id=request.session.get("user_id"),entity_type="VISIT",entity_id=v.id,action="COMPLETE_OTP_VERIFIED",new_value="customer OTP verified"));db.commit();return RedirectResponse(f"/visits/{activity_id}",303)
-    finally:db.close()
+        db.add(AuditLog(user_id=request.session['user_id'],entity_type="VISIT",entity_id=v.id,action="COMPLETE_OTP_VERIFIED",new_value="customer OTP verified"))
+        return RedirectResponse(f"/visits/{activity_id}",303)
 
 
 @app.get("/**", include_in_schema=False)
