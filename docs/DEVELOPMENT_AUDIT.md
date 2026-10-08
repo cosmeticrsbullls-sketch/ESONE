@@ -70,3 +70,13 @@ Workflow release validation: 32 isolated tests pass, including 8 new call/demo t
 ## Interface refresh
 
 Shared light workspace with gold accents, role-aware navigation, dashboard metric/module cards, responsive tables and larger touch targets. Call/PTP/demo outcomes are selectable options; treatment choices include NanoBeen, BeenBotox, KeraBeen and custom treatment. Conditional inputs show only when relevant; server validation is retained. Shared Earthshine branding supports the original logo asset when supplied. At preparation, the standalone original logo was unavailable, so the interface uses text branding pending that asset. No production records or schema are modified. Existing 32 regression tests pass; cloud-browser visual review is unavailable because the retained credential session cannot resume.
+
+## Salon picker, demo calendar and approved logo
+
+Salons now have an explicit selection prompt, searchable options, empty-state guidance and a visible New Salon link. The registration form is anchored in CRM and can return safely to the booking/call form with the saved salon selected. Registration requires a session CSRF token and rejects empty salon names. No existing customer records were changed by development.
+
+Demo Bookings now presents a Monday-first month calendar, highlights non-cancelled booking dates, shows daily counts, filters by active educator and drills into a selected day. Calendar highlights retain all workload for the chosen educator even when the table is filtered by salon/status. Date links prefill the booking date and educator. A day without recorded bookings does not guarantee educator availability; demo duration/working-hours conflict checks remain future work.
+
+The user approved the original EPS Earthshine logo. A faithful PNG render of that original is used in the existing shared login/sidebar/mobile branding; the original EPS is unchanged. No generative recreation was used.
+
+Validation: 37 isolated tests pass, including calendar/date/educator filtering, registration return navigation, role/CSRF guards and empty salon states. Generated JavaScript syntax checks and PNG serving checks pass.
