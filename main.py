@@ -1137,3 +1137,19 @@ def earthshine_logo():
     if not LOGO_PATH.exists():
         return Response(status_code=404)
     return FileResponse(LOGO_PATH, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def app_manifest():
+    from fastapi.responses import FileResponse
+    from modules.ui import LOGO_PATH
+    return FileResponse(LOGO_PATH.parent / "manifest.webmanifest", media_type="application/manifest+json", headers={"Cache-Control": "public, max-age=300"})
+
+
+@app.get("/assets/{icon_name}", include_in_schema=False)
+def mobile_icon(icon_name: str):
+    from fastapi.responses import FileResponse, Response
+    from modules.ui import LOGO_PATH
+    if icon_name not in {"icon-192.png", "icon-512.png", "apple-touch-icon.png"}:
+        return Response(status_code=404)
+    return FileResponse(LOGO_PATH.parent / icon_name, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})

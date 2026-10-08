@@ -47,7 +47,7 @@ def navigation(path, name, role):
 
 def enhance(document, path, name='', role='', signed_in=False):
     if '</head>' not in document or '<body' not in document:return document
-    document=document.replace('</head>','<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/assets/esone.css?v=4"></head>',1)
+    document=document.replace('</head>','<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/assets/esone.css?v=4"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png"><meta name="theme-color" content="#f5f6f8"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="ESONE"><meta name="apple-mobile-web-app-status-bar-style" content="default"></head>',1)
     start=document.index('<body');end=document.index('>',start)
     is_login=path in {'/','/login','/login/'} and not signed_in
     cls='esone-login' if is_login else 'esone-app'
