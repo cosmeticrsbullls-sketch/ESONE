@@ -80,3 +80,7 @@ Demo Bookings now presents a Monday-first month calendar, highlights non-cancell
 The user approved the original EPS Earthshine logo. A faithful PNG render of that original is used in the existing shared login/sidebar/mobile branding; the original EPS is unchanged. No generative recreation was used.
 
 Validation: 37 isolated tests pass, including calendar/date/educator filtering, registration return navigation, role/CSRF guards and empty salon states. Generated JavaScript syntax checks and PNG serving checks pass.
+
+## Mobile shortcut branding
+
+ESONE home-screen metadata includes Android web manifest icons (192/512 pixels, safe maskable padding), iPhone apple-touch icon (180 pixels), ESONE shortcut title and a PNG favicon. Icons faithfully render only the approved blue round emblem from the original EPS. This does not add offline support or background synchronization. Existing shortcuts may need to be removed and added again to pick up the icon. No production records or schema are changed.
