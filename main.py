@@ -703,7 +703,8 @@ def mobile_home(request: Request):
     """
 
 @app.get("/clients", response_class=HTMLResponse)
-def clients_page(request: Request, q: str = ""):
+def clients_page(request: Request, q: str = "", return_to: str = ""):
+    from modules.workflows import hidden
     if not request.session.get("user_id"):
         return RedirectResponse("/", status_code=303)
 
@@ -794,9 +795,9 @@ def clients_page(request: Request, q: str = ""):
             </header>
 
             <div class="container">
-                <div class="panel">
-                    <h2>Add Client / Venue</h2>
-                    <form method="post" action="/clients/create">
+                <div class="panel" id="new-salon">
+                    <h2>Register New Salon / Client</h2>
+                    <form method="post" action="/clients/create">{hidden(request)}<input type="hidden" name="return_to" value="{escape(return_to if return_to in {'/demos/new','/calls/new'} else '',quote=True)}">
                         <div class="grid">
                             <div><label>Business / Salon Name *</label><input name="business_name" required></div>
                             <div><label>Owner / Contact Person</label><input name="contact_person"></div>
@@ -882,7 +883,9 @@ def create_client(
     client_category: str = Form("B"),
     client_type: str = Form("SALON"),
     status: str = Form("LEAD"),
-    assigned_sales_id: str = Form("")
+    assigned_sales_id: str = Form(""),
+    return_to: str = Form(""),
+    csrf: str = Form("")
 ):
     if not request.session.get("user_id"):
         return RedirectResponse("/", status_code=303)
@@ -890,8 +893,12 @@ def create_client(
     if request.session.get("role") not in {"SUPER_ADMIN", "MANAGEMENT", "OFFICE"}:
         return HTMLResponse("Access Denied", status_code=403)
 
+    from modules.workflows import guard
+    denied = guard(request, csrf)
+    if denied is not None: return denied
     db = SessionLocal()
     try:
+        if not business_name.strip(): return HTMLResponse("Salon name is required.",400)
         assigned_id = int(assigned_sales_id) if assigned_sales_id.strip().isdigit() else None
         client = Client(
             client_name=business_name.strip(),
@@ -911,7 +918,8 @@ def create_client(
         )
         db.add(client)
         db.commit()
-        return RedirectResponse("/clients", status_code=303)
+        destination = f"{return_to}?client_id={client.id}" if return_to in {"/demos/new", "/calls/new"} else "/clients"
+        return RedirectResponse(destination, status_code=303)
     finally:
         db.close()
 

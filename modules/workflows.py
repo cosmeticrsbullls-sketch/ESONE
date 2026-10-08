@@ -36,6 +36,10 @@ def audit(db, request, entity, identity, action, old=None, new=None):
 
 def page(title, content):
     return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE {escape(title)}</title><style>body{{font:16px Arial;background:#f5f5f5;color:#222;margin:20px}}main{{max-width:1100px;margin:auto;background:white;padding:24px;border-radius:12px}}label{{display:block;margin:14px 0}}input,select,textarea,button{{padding:10px;max-width:100%;box-sizing:border-box}}table{{border-collapse:collapse;width:100%}}td,th{{padding:12px;border-bottom:1px solid #ddd;text-align:left}}.table{{overflow:auto}}a{{color:#725700}}button{{cursor:pointer}}</style></head><body><main class="workflow"><nav><a href="/command-center">Command Center</a> · <a href="/operations">Reports</a> · <a href="/calls/new">Record Call</a> · <a href="/demos">Demos</a></nav><h1>{escape(title)}</h1>{content}</main><script>
+document.querySelectorAll('.salon-picker').forEach(picker=>{{
+const search=picker.querySelector('.salon-search');const select=picker.querySelector('select');const original=Array.from(select.options).map(option=>({{value:option.value,text:option.text,disabled:option.disabled}}));
+search.addEventListener('input',()=>{{const selected=select.value;const term=search.value.trim().toLowerCase();const matches=original.filter(option=>option.value&&option.text.toLowerCase().includes(term));select.replaceChildren();const placeholder=new Option(matches.length?'Select a salon':original.length===1?'No salons registered — add a new salon first':'No matching salons — change search', '');placeholder.disabled=true;select.add(placeholder);matches.forEach(option=>select.add(new Option(option.text,option.value)));select.value=matches.some(option=>option.value===selected)?selected:'';picker.querySelector('.salon-help').textContent=matches.length?matches.length+' matching salons':'Use + New Salon to register a salon, or change your search.';}});
+}});
 document.querySelectorAll('form').forEach(form=>{{
 const refresh=()=>{{
 const ptp=form.querySelector('input[name=outcome][value=PTP]');const courtesy=form.querySelector('input[name=kind][value=COURTESY_CALL]');if(ptp&&courtesy){{ptp.disabled=courtesy.checked;if(ptp.disabled&&ptp.checked)form.querySelector('input[name=outcome][value=CONTACTED]').checked=true;}}
@@ -54,7 +58,16 @@ def choices(name, options, selected, title):
 
 
 def clients_select(db, selected=0):
-    return ''.join(f'<option value="{c.id}" {"selected" if c.id==selected else ""}>{escape(c.business_name)} · {escape(c.phone or "")}</option>' for c in db.query(Client).order_by(Client.business_name).all())
+    clients=db.query(Client).order_by(Client.business_name, Client.id).all()
+    prompt='Select a salon' if clients else 'No salons registered — add a new salon first'
+    options=f'<option value="" disabled {"selected" if not any(c.id==selected for c in clients) else ""}>{prompt}</option>'
+    options+=''.join(f'<option value="{c.id}" {"selected" if c.id==selected else ""}>{escape(c.business_name)} · {escape(c.phone or c.area or "")}</option>' for c in clients)
+    return options
+
+
+def salon_field(options, destination):
+    return f'''<div class="salon-picker"><label>Salon <input type="search" class="salon-search" placeholder="Search salon / phone" aria-label="Search salon options" autocomplete="off"><select name="client_id" required aria-label="Salon">{options}</select></label><a class="secondary" href="/clients?return_to={destination}#new-salon">+ New Salon</a><small class="salon-help" aria-live="polite">Select a registered salon, or add a new one.</small></div>'''
+
 
 def amount(value):
     try:
@@ -71,7 +84,7 @@ def call_form(request: Request, client_id: int=0, kind: str='COLLECTION'):
     if denied is not None:return denied
     if kind not in {'COLLECTION','COURTESY_CALL'}:return HTMLResponse('Invalid call type',400)
     with SessionLocal() as db:options=clients_select(db,client_id)
-    return page('Record Call',f'''<form method="post" action="/calls">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}"><label>Salon <select name="client_id" required>{options}</select></label>{choices("kind", [("COLLECTION","Collection / Telecalling"),("COURTESY_CALL","Courtesy Call")], kind, "Call type")}{choices("outcome", [("CONTACTED","Contacted"),("NO_ANSWER","No answer"),("CALL_BACK","Call back"),("REFUSED","Refused"),("PTP","Promise to pay")], "CONTACTED", "Call outcome")}<label>Notes <textarea name="notes" maxlength="4000" required></textarea></label><label data-when="promise">PTP amount <input name="promised_amount" type="number" min="0.01" step="0.01"></label><label data-when="promise">PTP date <input name="promise_date" type="date"></label><button>Save Call</button><p>Recording a promise does not record a payment. CONTACTED clears the current courtesy reminder; unanswered calls stay due.</p></form>''')
+    return page('Record Call',f'''<form method="post" action="/calls">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(options, "/calls/new")}{choices("kind", [("COLLECTION","Collection / Telecalling"),("COURTESY_CALL","Courtesy Call")], kind, "Call type")}{choices("outcome", [("CONTACTED","Contacted"),("NO_ANSWER","No answer"),("CALL_BACK","Call back"),("REFUSED","Refused"),("PTP","Promise to pay")], "CONTACTED", "Call outcome")}<label>Notes <textarea name="notes" maxlength="4000" required></textarea></label><label data-when="promise">PTP amount <input name="promised_amount" type="number" min="0.01" step="0.01"></label><label data-when="promise">PTP date <input name="promise_date" type="date"></label><button>Save Call</button><p>Recording a promise does not record a payment. CONTACTED clears the current courtesy reminder; unanswered calls stay due.</p></form>''')
 
 @router.post('/calls')
 def record_call(request: Request, client_id:int=Form(...), kind:str=Form(...), outcome:str=Form(...), notes:str=Form(...), csrf:str=Form(''), submission:str=Form(''), promised_amount:str=Form(''), promise_date:str=Form('')):
@@ -141,24 +154,23 @@ def ptp_followup(ptp_id:int,request:Request,outcome:str=Form(...),notes:str=Form
     return RedirectResponse(f'/clients/{cid}/timeline',303)
 
 @router.get('/demos',response_class=HTMLResponse)
-def demos(request:Request,status:str='',q:str=''):
+def demos(request:Request,status:str='',q:str='',month:str='',educator_id:int=0,day:date|None=None):
     denied=access(request)
     if denied is not None:return denied
+    from modules.demo_calendar import calendar_view
     with SessionLocal() as db:
-        query=db.query(DemoBooking,Activity,Client).join(Activity,Activity.id==DemoBooking.activity_id).join(Client,Client.id==Activity.client_id)
-        if status:query=query.filter(Activity.status==status)
-        if q:query=query.filter(Client.business_name.ilike(f'%{q}%'))
-        rows=''.join(f'<tr><td><a href="/demos/{d.id}">{d.id}</a></td><td>{escape(c.business_name)}</td><td>{escape(d.product_or_treatment or "")}</td><td>{d.demo_date}</td><td>{d.assigned_educator_id}</td><td>{escape(a.status)}</td><td>{escape(d.conversion_status or "")}</td></tr>' for d,a,c in query.order_by(DemoBooking.demo_date,DemoBooking.id).all())
-    return page('Demo Bookings',f'<p><a href="/demos/new">Book Demo</a></p><form><input name="q" placeholder="Salon" value="{escape(q,quote=True)}"><select name="status"><option value="">All statuses</option>{"".join(f"<option {"selected" if s==status else ""}>{s}</option>" for s in ["BOOKED","IN_PROGRESS","COMPLETED","CANCELLED"])}</select><button>Filter</button></form><p>Demo times are displayed in India time. <a href="/operations?kind=demos">Demo history / filtered Excel</a></p><div class="table"><table><tr><th>ID</th><th>Salon</th><th>Treatment</th><th>Demo date</th><th>Educator ID</th><th>Status</th><th>Result</th></tr>{rows or "<tr><td colspan=7>No demo bookings.</td></tr>"}</table></div>')
+        try:content=calendar_view(db,month,educator_id,day,q,status)
+        except ValueError as error:return HTMLResponse(escape(str(error)),400)
+    return page('Demo Bookings',content)
 
 @router.get('/demos/new',response_class=HTMLResponse)
-def demo_form(request:Request):
+def demo_form(request:Request, client_id:int=0, demo_day:date|None=None, educator_id:int=0):
     denied=access(request)
     if denied is not None:return denied
     with SessionLocal() as db:
-        clients=clients_select(db)
-        people=''.join(f'<option value="{u.id}">{escape(u.full_name)}</option>' for u in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
-    return page('Book Demo',f'''<form method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}"><label>Salon <select name="client_id">{clients}</select></label><label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" required></label><label>Educator <select name="educator_id">{people}</select></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>Book Demo</button></form>''')
+        clients=clients_select(db,client_id)
+        people='<option value="" disabled '+('selected' if not educator_id else '')+'>Select educator</option>'+''.join(f'<option value="{u.id}" {"selected" if u.id==educator_id else ""}>{escape(u.full_name)}</option>' for u in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
+    return page('Book Demo',f'''<p><a class="secondary" href="/demos">View demo calendar</a></p><form method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients, "/demos/new")}<label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" value="{str(demo_day)+'T10:00' if demo_day and demo_day>=business_today() else ''}" required></label><label>Educator <select name="educator_id" required>{people}</select></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>Book Demo</button></form>''')
 
 @router.post('/demos')
 def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(...),treatment:str=Form(...),demo_at:str=Form(...),notes:str=Form(''),csrf:str=Form(''),submission:str=Form(''),custom_treatment:str=Form('')):
