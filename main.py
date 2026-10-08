@@ -244,105 +244,25 @@ def command_center(request: Request):
             today_count = sum(row[6] == "TODAY" for row in ptp_rows)
             overdue_count = sum(row[6] == "OVERDUE" for row in ptp_rows)
             demo_count = db.query(DemoBooking).join(Activity, Activity.id == DemoBooking.activity_id).filter(Activity.status.in_(["BOOKED", "IN_PROGRESS"])).count()
-        summary = f"<p>Courtesy calls due: <strong>{courtesy_count}</strong> · PTP today: <strong>{today_count}</strong> · PTP overdue: <strong>{overdue_count}</strong> · Active demos: <strong>{demo_count}</strong></p>"
-
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>ESONE Command Center</title>
-
-        <style>
-            body {{
-                margin: 0;
-                background: #101010;
-                color: white;
-                font-family: Arial, sans-serif;
-            }}
-
-            header {{
-                padding: 22px 35px;
-                border-bottom: 1px solid #333;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }}
-
-            .brand {{
-                font-size: 24px;
-                font-weight: bold;
-            }}
-
-            .gold {{
-                color: #d4af37;
-            }}
-
-            .content {{
-                padding: 50px;
-            }}
-
-            .card {{
-                max-width: 700px;
-                padding: 30px;
-                background: #181818;
-                border: 1px solid #333;
-                border-radius: 15px;
-            }}
-
-            .role {{
-                color: #d4af37;
-            }}
-
-            a {{
-                color: #d4af37;
-                text-decoration: none;
-            }}
-        </style>
-    </head>
-
-    <body>
-
-        <header>
-
-            <div class="brand">
-                ES<span class="gold">ONE</span>
-            </div>
-
-            <a href="/logout">Logout</a>
-
-        </header>
-
-        <div class="content">
-
-            <div class="card">
-
-                <h2>Welcome, {name}</h2>
-
-                <p>
-                    Role:
-                    <span class="role">{role}</span>
-                </p>
-
-                <h3>ESONE COMMAND CENTER</h3>
-                {summary}
-
-                <p>
-                    <a href="/visits">Field Visits</a> · <a href="/operations">Courtesy Calls / PTP / Reports</a> · <a href="/calls/new">Record Call</a> · <a href="/demos">Demo Bookings</a>
-                </p>
-
-                <p style="margin-top:25px;">
-                    <a href="/clients" style="display:inline-block;padding:12px 18px;border:1px solid #d4af37;border-radius:8px;">
-                        CRM / CLIENT MASTER
-                    </a>
-                </p>
-
-            </div>
-
-        </div>
-
-    </body>
-    </html>
-    """
+        from modules.ui import icon
+        metrics = [
+            ("Courtesy calls due", courtesy_count, "/operations?kind=courtesy", "Salons ready for a follow-up"),
+            ("PTP today", today_count, "/operations?kind=ptp", "Promises due today"),
+            ("PTP overdue", overdue_count, "/operations?kind=ptp", "Promises needing attention"),
+            ("Active demos", demo_count, "/demos", "Booked or in progress"),
+        ]
+        summary = '<section class="metrics" aria-label="Today’s work">' + ''.join(
+            f'<a class="metric" href="{url}"><div class="metric-label">{label}: <strong>{count}</strong></div><div class="number" aria-hidden="true">{count}</div><div class="hint">{hint} →</div></a>' for label,count,url,hint in metrics) + '</section>'
+    from modules.ui import icon
+    from modules.operations import business_today
+    cards = [("clients", "Clients & CRM", "Salon contacts, assignments and activity history.", "/clients"),
+             ("visits", "Field Visits", "Manage field visits and verified check-ins.", "/visits"),
+             ("calls", "Calls & Collections", "Record calls, promises and follow-up outcomes.", "/calls/new"),
+             ("demos", "Demo Bookings", "Schedule treatments and track conversion outcomes.", "/demos"),
+             ("reports", "Reports & Follow-ups", "Courtesy queues, PTPs and filtered Excel exports.", "/operations")]
+    if role == "SUPER_ADMIN": cards.append(("clients", "Team & Access", "Manage employee accounts and roles.", "/users"))
+    modules = ''.join(f'<a class="module-card" href="{url}"><div class="module-icon">{icon(key)}</div><h3>{title}</h3><p>{description}</p><span class="open">Open workspace →</span></a>' for key,title,description,url in cards)
+    return f'''<!doctype html><html><head><title>ESONE Command Center</title></head><body><main class="dashboard"><section class="hero"><div><div class="eyebrow">Command Center · {business_today().strftime('%d %b %Y')}</div><h1>Welcome, {name}</h1><p>Your clients, follow-ups and team activity in one place.</p></div><div class="actions"><a class="primary" href="/calls/new">+ Record Call</a><a class="secondary" href="/demos/new">+ Book Demo</a></div></section>{summary}<div class="section-heading"><h2>Your workspaces</h2><span style="font-size:12px;color:#87929c">ESONE · Earthshine Professional</span></div><section class="module-grid">{modules}</section></main></body></html>'''
 
 
 @app.get("/logout")
@@ -1175,3 +1095,37 @@ def database_readiness():
 
 from modules.workflows import router as workflow_router
 app.include_router(workflow_router)
+
+
+@app.get("/assets/esone.css", include_in_schema=False)
+def esone_stylesheet():
+    from fastapi.responses import Response
+    from modules.ui import CSS
+    return Response(CSS, media_type="text/css", headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.middleware("http")
+async def esone_presentation(request: Request, call_next):
+    response = await call_next(request)
+    if "text/html" not in response.headers.get("content-type", ""):
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    from modules.ui import enhance
+    session = request.scope.get("session", {})
+    document = enhance(body.decode("utf-8"), request.url.path,
+                       str(session.get("full_name") or ""), str(session.get("role") or ""),
+                       bool(session.get("user_id")))
+    from fastapi.responses import Response
+    headers = dict(response.headers)
+    headers.pop("content-length", None)
+    return Response(document, status_code=response.status_code, headers=headers,
+                    background=response.background)
+
+
+@app.get("/assets/earthshine-logo.png", include_in_schema=False)
+def earthshine_logo():
+    from modules.ui import LOGO_PATH
+    from fastapi.responses import FileResponse, Response
+    if not LOGO_PATH.exists():
+        return Response(status_code=404)
+    return FileResponse(LOGO_PATH, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})

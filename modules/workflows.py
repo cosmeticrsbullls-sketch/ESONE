@@ -35,10 +35,23 @@ def audit(db, request, entity, identity, action, old=None, new=None):
                     entity_id=identity, action=action, old_value=old, new_value=new))
 
 def page(title, content):
-    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE {escape(title)}</title><style>body{{font:16px Arial;background:#f5f5f5;color:#222;margin:20px}}main{{max-width:1100px;margin:auto;background:white;padding:24px;border-radius:12px}}label{{display:block;margin:14px 0}}input,select,textarea,button{{padding:10px;max-width:100%;box-sizing:border-box}}table{{border-collapse:collapse;width:100%}}td,th{{padding:12px;border-bottom:1px solid #ddd;text-align:left}}.table{{overflow:auto}}a{{color:#725700}}button{{cursor:pointer}}</style></head><body><main><nav><a href="/command-center">Command Center</a> · <a href="/operations">Reports</a> · <a href="/calls/new">Record Call</a> · <a href="/demos">Demos</a></nav><h1>{escape(title)}</h1>{content}</main></body></html>'''
+    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE {escape(title)}</title><style>body{{font:16px Arial;background:#f5f5f5;color:#222;margin:20px}}main{{max-width:1100px;margin:auto;background:white;padding:24px;border-radius:12px}}label{{display:block;margin:14px 0}}input,select,textarea,button{{padding:10px;max-width:100%;box-sizing:border-box}}table{{border-collapse:collapse;width:100%}}td,th{{padding:12px;border-bottom:1px solid #ddd;text-align:left}}.table{{overflow:auto}}a{{color:#725700}}button{{cursor:pointer}}</style></head><body><main class="workflow"><nav><a href="/command-center">Command Center</a> · <a href="/operations">Reports</a> · <a href="/calls/new">Record Call</a> · <a href="/demos">Demos</a></nav><h1>{escape(title)}</h1>{content}</main><script>
+document.querySelectorAll('form').forEach(form=>{{
+const refresh=()=>{{
+const ptp=form.querySelector('input[name=outcome][value=PTP]');const courtesy=form.querySelector('input[name=kind][value=COURTESY_CALL]');if(ptp&&courtesy){{ptp.disabled=courtesy.checked;if(ptp.disabled&&ptp.checked)form.querySelector('input[name=outcome][value=CONTACTED]').checked=true;}}
+const data=new FormData(form);const outcome=data.get('outcome');const action=data.get('action');
+form.querySelectorAll('[data-when]').forEach(el=>{{const type=el.dataset.when;const visible=type==='promise'?(outcome==='PTP'||outcome==='RESCHEDULED'):type==='other'?data.get('treatment')==='OTHER':type==='complete'?action==='COMPLETE':action==='COMPLETE'&&data.get('result')==='FOLLOW_UP';el.hidden=!visible;el.querySelectorAll('input,select').forEach(input=>{{input.disabled=!visible;input.required=visible;}});}});
+}};form.addEventListener('change',refresh);refresh();
+}});
+</script></body></html>'''
 
 def hidden(request):
     return f'<input type="hidden" name="csrf" value="{token(request)}">'
+
+def choices(name, options, selected, title):
+    items = ''.join(f'<label class="choice"><input type="radio" name="{name}" value="{value}" {"checked" if value==selected else ""}><span>{escape(label)}</span></label>' for value,label in options)
+    return f'<fieldset class="choice-group" {'data-when="complete"' if name=="result" else ""}><legend>{escape(title)}</legend><div class="choice-options">{items}</div></fieldset>'
+
 
 def clients_select(db, selected=0):
     return ''.join(f'<option value="{c.id}" {"selected" if c.id==selected else ""}>{escape(c.business_name)} · {escape(c.phone or "")}</option>' for c in db.query(Client).order_by(Client.business_name).all())
@@ -58,7 +71,7 @@ def call_form(request: Request, client_id: int=0, kind: str='COLLECTION'):
     if denied is not None:return denied
     if kind not in {'COLLECTION','COURTESY_CALL'}:return HTMLResponse('Invalid call type',400)
     with SessionLocal() as db:options=clients_select(db,client_id)
-    return page('Record Call',f'''<form method="post" action="/calls">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}"><label>Salon <select name="client_id" required>{options}</select></label><label>Call type <select name="kind"><option value="COLLECTION" {'selected' if kind=='COLLECTION' else ''}>Collection / Telecalling</option><option value="COURTESY_CALL" {'selected' if kind=='COURTESY_CALL' else ''}>Courtesy Call</option></select></label><label>Outcome <select name="outcome">{''.join(f'<option>{o}</option>' for o in sorted(CALL_OUTCOMES))}</select></label><label>Notes <textarea name="notes" maxlength="4000" required></textarea></label><label>PTP amount (only for PTP outcome) <input name="promised_amount" type="number" min="0.01" step="0.01"></label><label>PTP date (only for PTP outcome) <input name="promise_date" type="date"></label><button>Save Call</button><p>Recording a promise does not record a payment. CONTACTED clears the current courtesy reminder; unanswered calls stay due.</p></form>''')
+    return page('Record Call',f'''<form method="post" action="/calls">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}"><label>Salon <select name="client_id" required>{options}</select></label>{choices("kind", [("COLLECTION","Collection / Telecalling"),("COURTESY_CALL","Courtesy Call")], kind, "Call type")}{choices("outcome", [("CONTACTED","Contacted"),("NO_ANSWER","No answer"),("CALL_BACK","Call back"),("REFUSED","Refused"),("PTP","Promise to pay")], "CONTACTED", "Call outcome")}<label>Notes <textarea name="notes" maxlength="4000" required></textarea></label><label data-when="promise">PTP amount <input name="promised_amount" type="number" min="0.01" step="0.01"></label><label data-when="promise">PTP date <input name="promise_date" type="date"></label><button>Save Call</button><p>Recording a promise does not record a payment. CONTACTED clears the current courtesy reminder; unanswered calls stay due.</p></form>''')
 
 @router.post('/calls')
 def record_call(request: Request, client_id:int=Form(...), kind:str=Form(...), outcome:str=Form(...), notes:str=Form(...), csrf:str=Form(''), submission:str=Form(''), promised_amount:str=Form(''), promise_date:str=Form('')):
@@ -103,7 +116,7 @@ def ptp_form(ptp_id:int,request:Request):
         if not p:return HTMLResponse('PTP not found',404)
         c=db.get(Client,p.client_id)
         summary=f'<p>{escape(c.business_name)} · ₹{p.promised_amount} · {p.promise_date.date()} · {escape(p.status)}</p>'
-    return page('PTP Follow-up',summary+f'''<form method="post">{hidden(request)}<label>Outcome <select name="outcome"><option>BROKEN</option><option>CANCELLED</option><option>RESCHEDULED</option></select></label><label>Notes <textarea name="notes" required maxlength="4000"></textarea></label><label>New promise date (reschedule only) <input name="promise_date" type="date"></label><label>New amount (reschedule only) <input name="promised_amount" type="number" step="0.01" min="0.01"></label><button>Save Follow-up</button><p>Payments require a separate verified receipt workflow. This form does not mark balances paid.</p></form>''')
+    return page('PTP Follow-up',summary+f'''<form method="post">{hidden(request)}{choices("outcome", [("BROKEN","Promise broken"),("CANCELLED","Cancel promise"),("RESCHEDULED","Reschedule")], "BROKEN", "Follow-up outcome")}<label>Notes <textarea name="notes" required maxlength="4000"></textarea></label><label data-when="promise">New promise date <input name="promise_date" type="date"></label><label data-when="promise">New amount <input name="promised_amount" type="number" step="0.01" min="0.01"></label><button>Save Follow-up</button><p>Payments require a separate verified receipt workflow. This form does not mark balances paid.</p></form>''')
 
 @router.post('/ptps/{ptp_id}')
 def ptp_followup(ptp_id:int,request:Request,outcome:str=Form(...),notes:str=Form(...),csrf:str=Form(''),promise_date:str=Form(''),promised_amount:str=Form('')):
@@ -145,16 +158,17 @@ def demo_form(request:Request):
     with SessionLocal() as db:
         clients=clients_select(db)
         people=''.join(f'<option value="{u.id}">{escape(u.full_name)}</option>' for u in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
-    return page('Book Demo',f'''<form method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}"><label>Salon <select name="client_id">{clients}</select></label><label>Treatment <input name="treatment" required maxlength="200"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" required></label><label>Educator <select name="educator_id">{people}</select></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>Book Demo</button></form>''')
+    return page('Book Demo',f'''<form method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}"><label>Salon <select name="client_id">{clients}</select></label><label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" required></label><label>Educator <select name="educator_id">{people}</select></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>Book Demo</button></form>''')
 
 @router.post('/demos')
-def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(...),treatment:str=Form(...),demo_at:str=Form(...),notes:str=Form(''),csrf:str=Form(''),submission:str=Form('')):
+def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(...),treatment:str=Form(...),demo_at:str=Form(...),notes:str=Form(''),csrf:str=Form(''),submission:str=Form(''),custom_treatment:str=Form('')):
     denied=guard(request,csrf)
     if denied is not None:return denied
     try:
         scheduled=datetime.fromisoformat(demo_at)
         if scheduled.tzinfo or scheduled<datetime.now(ZoneInfo('Asia/Kolkata')).replace(tzinfo=None):raise ValueError()
     except ValueError:return HTMLResponse('Choose a future India date and time.',400)
+    if treatment == 'OTHER': treatment = custom_treatment
     if not treatment.strip() or len(treatment)>200 or len(notes)>4000 or not 16<=len(submission)<=80:return HTMLResponse('Invalid booking details.',400)
     with SessionLocal.begin() as db:
         db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
@@ -178,7 +192,7 @@ def demo_detail(demo_id:int,request:Request):
         content=f'<p>{escape(c.business_name)} · {escape(d.product_or_treatment or "")} · {d.demo_date} (India)</p><p>Educator: {escape(u.full_name if u else "Unassigned")} · {escape(a.status)} · {escape(d.conversion_status or "")}</p><p>{escape(a.notes or "")}</p><p>Follow-up: {d.followup_at.date() if d.followup_at else "—"}</p><p>Started: {d.started_at or "—"} · Completed: {d.completed_at or "—"} (UTC)</p>'
         if a.status in {'BOOKED','IN_PROGRESS'}:
             actions=['START','CANCEL'] if a.status=='BOOKED' else ['COMPLETE']
-            content+=f'''<form method="post">{hidden(request)}<label>Action <select name="action">{''.join(f'<option>{v}</option>' for v in actions)}</select></label><label>Conversion result (completion only) <select name="result"><option>PENDING</option><option>CONVERTED</option><option>NOT_CONVERTED</option><option>FOLLOW_UP</option></select></label><label>Notes / reason <textarea name="notes" maxlength="4000" required></textarea></label><label>Follow-up date (required for FOLLOW_UP) <input name="followup" type="date"></label><button>Save</button></form>'''
+            content+=f'''<form method="post">{hidden(request)}{choices("action", [(v,{"START":"Start Demo","CANCEL":"Cancel Booking","COMPLETE":"Complete Demo"}[v]) for v in actions], actions[0], "Demo action")}{choices("result", [("CONVERTED","Converted"),("NOT_CONVERTED","Not converted"),("FOLLOW_UP","Follow-up needed")], "CONVERTED", "Conversion result (completion only)")}<label>Notes / reason <textarea name="notes" maxlength="4000" required></textarea></label><label data-when="followup">Follow-up date <input name="followup" type="date"></label><button>Save</button></form>'''
     return page('Demo Details',content)
 
 @router.post('/demos/{demo_id}')

@@ -66,3 +66,7 @@ Demo management supports future India-time bookings, assignment to an active emp
 All new forms require session CSRF tokens; management role checks protect reads and writes. Tests use synthetic in-memory records. No migration, production test submission, or data initialization is needed for this release.
 
 Workflow release validation: 32 isolated tests pass, including 8 new call/demo tests, with pinned dependencies. `pip check` and `git diff --check` pass.
+
+## Interface refresh
+
+Shared light workspace with gold accents, role-aware navigation, dashboard metric/module cards, responsive tables and larger touch targets. Call/PTP/demo outcomes are selectable options; treatment choices include NanoBeen, BeenBotox, KeraBeen and custom treatment. Conditional inputs show only when relevant; server validation is retained. Shared Earthshine branding supports the original logo asset when supplied. At preparation, the standalone original logo was unavailable, so the interface uses text branding pending that asset. No production records or schema are modified. Existing 32 regression tests pass; cloud-browser visual review is unavailable because the retained credential session cannot resume.
