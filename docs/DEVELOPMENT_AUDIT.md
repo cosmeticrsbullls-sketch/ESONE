@@ -29,9 +29,9 @@ The current phase-1 workbook contains 123 features and no populated user decisio
 | Users / roles | Basic login, user creation, four roles exist | Employee profiles, granular permissions, reset flow |
 | CRM / leads | Client create/list exists; activity timeline added | Duplicate handling, scoped assignments, lead lifecycle |
 | Field visits | Existing workflow repaired and tested | GPS accuracy, verified checkout GPS, outcomes, assignment UX, one-button suggestions |
-| Courtesy calls | Derived due queue and XLSX now built | Persist call outcomes/history; completing a call must clear its due reminder through approved workflow |
-| Collections / PTP / telecalling | Models existed; read-only due queue now built | Call entry, PTP entry/update, receipts, posting approvals and complete ledger |
-| Demo management | Model only | Booking/calendar/assignment/conversion UI |
+| Courtesy calls | Derived due queue and XLSX now built | Implemented CONTACTED completion linked to the latest visit; unanswered attempts remain due |
+| Collections / PTP / telecalling | Models existed; read-only due queue now built | Call/PTP entry and follow-up now implemented; receipts, posting approvals and complete ledger remain |
+| Demo management | Booking, active employee assignment, start/completion/cancellation, conversion results and follow-up date now implemented | Educator self-service, calendar view, availability checks and automatic order conversion remain |
 | Orders / delivery | Models only | Product/price master, line items, order lifecycle, dispatch/partial delivery |
 | OTP / WhatsApp | Local test OTP previously exposed publicly; now guarded | Real provider integration, consent, delivery callbacks, resend limits, durable failed-attempt lockout |
 | Command Center | Previously authentication placeholder; operations navigation added | Unified action queues and verified KPI summary |
@@ -56,3 +56,13 @@ For future releases: publish the tested commit, observe build status, check `/he
 24 automated tests passed against the repository's exact pinned dependencies; `pip check` found no broken requirements and `git diff --check` passed. Tests include public URL recovery, unauthenticated redirects, role/ownership denial, latest-visit courtesy dates, PTP date boundaries, matching XLSX filters, HTML/formula escaping, check-in replay, GPS validity/radius, synthetic OTP completion/replay, blocked production test-OTP disclosure, schema readiness and non-mutating read paths. Render deployment and read-only production database schema readiness passed. PostgreSQL write workflows have not been tested against production; authenticated report views were tested with synthetic data only.
 
 Remaining timestamp convention issue: historic local SQLite timestamps and Render server-generated naive timestamps need an agreed timezone/UTC migration strategy before a complete time-based reporting rollout. No historic timestamps were rewritten.
+
+## Call and demo workflow release
+
+Management/Office roles can record collection calls and PTPs, close broken/cancelled promises, or reschedule with a new linked promise while preserving the original amount/date. These operations do not create receipts, mark payments verified, or change ledger balances. Courtesy CONTACTED calls clear only the current latest-visit reminder; unanswered calls stay due. Durable submission markers prevent repeated call/demo creation, and PostgreSQL row locks serialize the relevant writes. SQLite tests cover sequential replay; PostgreSQL concurrent integration remains a follow-up validation.
+
+Demo management supports future India-time bookings, assignment to an active employee, BOOKED → IN_PROGRESS → COMPLETED with conversion outcome and follow-up date, or cancellation before start. System start/completion timestamps use UTC. Demo status transitions preserve activity notes and audit history. Educator self-service and scheduling conflict prevention are not included yet. Call/demo history export supports the operations filters; date filters apply to record creation timestamps. Demo scheduled dates and follow-up dates are labeled separately.
+
+All new forms require session CSRF tokens; management role checks protect reads and writes. Tests use synthetic in-memory records. No migration, production test submission, or data initialization is needed for this release.
+
+Workflow release validation: 32 isolated tests pass, including 8 new call/demo tests, with pinned dependencies. `pip check` and `git diff --check` pass.

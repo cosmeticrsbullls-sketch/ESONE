@@ -234,6 +234,17 @@ def command_center(request: Request):
 
     name = escape(str(request.session.get("full_name") or ""))
     role = request.session.get("role")
+    summary = ""
+    if role in {"SUPER_ADMIN", "MANAGEMENT", "OFFICE"}:
+        from modules.operations import queues
+        from database.models import DemoBooking, Activity
+        with SessionLocal() as db:
+            courtesy_count = len(queues(db, "courtesy")[1])
+            ptp_rows = queues(db, "ptp")[1]
+            today_count = sum(row[6] == "TODAY" for row in ptp_rows)
+            overdue_count = sum(row[6] == "OVERDUE" for row in ptp_rows)
+            demo_count = db.query(DemoBooking).join(Activity, Activity.id == DemoBooking.activity_id).filter(Activity.status.in_(["BOOKED", "IN_PROGRESS"])).count()
+        summary = f"<p>Courtesy calls due: <strong>{courtesy_count}</strong> · PTP today: <strong>{today_count}</strong> · PTP overdue: <strong>{overdue_count}</strong> · Active demos: <strong>{demo_count}</strong></p>"
 
     return f"""
     <!DOCTYPE html>
@@ -313,9 +324,10 @@ def command_center(request: Request):
                 </p>
 
                 <h3>ESONE COMMAND CENTER</h3>
+                {summary}
 
                 <p>
-                    <a href="/visits">Field Visits</a> · <a href="/operations">Courtesy Calls / PTP / Reports</a>
+                    <a href="/visits">Field Visits</a> · <a href="/operations">Courtesy Calls / PTP / Reports</a> · <a href="/calls/new">Record Call</a> · <a href="/demos">Demo Bookings</a>
                 </p>
 
                 <p style="margin-top:25px;">
@@ -1160,3 +1172,6 @@ def database_readiness():
         return {"status":"ready","service":"ESONE"}
     except SQLAlchemyError:
         return HTMLResponse("Database connection needs administrator review",503)
+
+from modules.workflows import router as workflow_router
+app.include_router(workflow_router)

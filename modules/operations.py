@@ -1,4 +1,4 @@
-"""Read-only operational queues derived from existing ESONE records."""
+"""Operational reports derived from existing ESONE records."""
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from html import escape
@@ -11,7 +11,7 @@ from openpyxl import Workbook
 from sqlalchemy import func
 
 from database.db import SessionLocal
-from database.models import Activity, Client, CollectionActivity, PromiseToPay, Visit
+from database.models import Activity, Client, CollectionActivity, PromiseToPay, Visit, DemoBooking
 
 router = APIRouter()
 MANAGEMENT_ROLES = {"SUPER_ADMIN", "MANAGEMENT", "OFFICE"}
@@ -48,6 +48,9 @@ def queues(db, kind, q="", start=None, end=None):
         today = business_today()
         rows = []
         for c, visited in records:
+            latest_visit = db.query(Activity).filter_by(client_id=c.id, activity_type="FIELD_VISIT", status="COMPLETED").filter(Activity.completed_at==visited).order_by(Activity.id.desc()).first()
+            if db.query(Activity).filter_by(parent_activity_id=latest_visit.id, activity_type="COURTESY_CALL", status="COMPLETED").first():
+                continue
             due = visited.date() + timedelta(days=7)
             if due > today or (start and due < start) or (end and due > end):
                 continue
@@ -79,6 +82,22 @@ def queues(db, kind, q="", start=None, end=None):
             query=query.filter((Client.business_name.ilike(like)) | (Client.phone.ilike(like)))
         headers=["Activity ID","Client ID","Salon","Visit Type","Status","Employee ID","Created","Check In","Check Out","Notes"]
         return headers,[[a.id,c.id,c.business_name,v.visit_type,a.status,a.assigned_user_id,a.created_at,v.check_in_at,v.check_out_at,a.notes or ""] for a,v,c in query.order_by(Activity.id.desc()).all()]
+    if kind in {"calls", "demos"}:
+        query = db.query(Activity, Client).join(Client, Client.id==Activity.client_id)
+        query = query.filter(Activity.activity_type.in_(["COLLECTION", "COURTESY_CALL"]) if kind=="calls" else Activity.activity_type=="DEMO")
+        if lower: query=query.filter(Activity.created_at>=lower)
+        if upper: query=query.filter(Activity.created_at<upper)
+        if q: query=query.filter((Client.business_name.ilike(f"%{q}%")) | (Client.phone.ilike(f"%{q}%")))
+        if kind=="calls":
+            headers=["Activity ID","Client ID","Salon","Call Type","Outcome","Status","Call Date (UTC)","Notes"]
+            rows=[[a.id,c.id,c.business_name,a.activity_type,a.title,a.status,a.created_at,a.notes or ""] for a,c in query.order_by(Activity.id.desc()).all()]
+        else:
+            headers=["Demo ID","Client ID","Salon","Treatment","Demo Date (India)","Educator ID","Status","Result","Follow-up","Notes"]
+            rows=[]
+            for a,c in query.order_by(Activity.id.desc()).all():
+                d=db.query(DemoBooking).filter_by(activity_id=a.id).first()
+                if d: rows.append([d.id,c.id,c.business_name,d.product_or_treatment,d.demo_date,d.assigned_educator_id,a.status,d.conversion_status,d.followup_at,a.notes or ""])
+        return headers,rows
     raise ValueError("Unknown report.")
 
 
@@ -110,11 +129,16 @@ def operations(request: Request, kind: str="courtesy", q: str="", start: date|No
         except ValueError as error:return HTMLResponse(escape(str(error)),400)
     from urllib.parse import urlencode
     params=urlencode({k:v for k,v in {"kind":kind,"q":q,"start":start,"end":end}.items() if v is not None})
+    actions = ""
+    if kind in {"courtesy", "ptp", "demos"}:
+        for row in rows:
+            url = f"/calls/new?client_id={row[0]}&kind=COURTESY_CALL" if kind=="courtesy" else f"/ptps/{row[0]}" if kind=="ptp" else f"/demos/{row[0]}"
+            actions += f'<p><a href="{escape(url,quote=True)}">{escape(str(row[2] if kind!="courtesy" else row[1]))} — {"Record Courtesy Call" if kind=="courtesy" else "Follow Up" if kind=="ptp" else "Demo Details"}</a></p>'
     headings="".join(f"<th>{escape(h)}</th>" for h in headers)
     body="".join("<tr>"+"".join(f"<td>{escape(str(v if v is not None else ''))}</td>" for v in row)+"</tr>" for row in rows)
     if not body:body=f'<tr><td colspan="{len(headers)}">No matching records.</td></tr>'
-    opts="".join(f'<option value="{key}" {"selected" if key==kind else ""}>{label}</option>' for key,label in [("courtesy","7-Day Courtesy Calls"),("ptp","PTP Due Today / Overdue"),("visits","Visit History")])
-    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE Operations</title><style>body{{font-family:Arial;margin:24px;background:#f5f5f5;color:#222}}main{{background:white;padding:24px;border-radius:12px}}table{{border-collapse:collapse;width:100%}}td,th{{padding:12px;border-bottom:1px solid #ddd;text-align:left}}.table{{overflow:auto}}input,select,button{{padding:10px;margin:5px}}a{{color:#222}}</style></head><body><main><a href="/command-center">← Command Center</a><h1>ESONE Operations</h1><p>Business date: {business_today()} (India). {len(rows)} matching records.</p><form><select name="kind">{opts}</select><input name="q" aria-label="Search salon or phone" value="{escape(q,quote=True)}" placeholder="Salon / phone"><label>From <input type="date" name="start" value="{start or ''}"></label><label>To <input type="date" name="end" value="{end or ''}"></label><button>Apply</button></form><a href="/reports/export?{escape(params,quote=True)}">Download filtered Excel</a><p>Courtesy calls become due 7 days after the latest completed visit. This screen derives reminders without changing customer or payment records.</p><div class="table"><table><tr>{headings}</tr>{body}</table></div></main><script>document.querySelector('form').addEventListener('submit',()=>{{document.querySelectorAll('input[type=date]').forEach(x=>{{if(!x.value)x.disabled=true}})}})</script></body></html>'''
+    opts="".join(f'<option value="{key}" {"selected" if key==kind else ""}>{label}</option>' for key,label in [("courtesy","7-Day Courtesy Calls"),("ptp","PTP Due Today / Overdue"),("visits","Visit History"),("calls","Call History"),("demos","Demo History")])
+    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE Operations</title><style>body{{font-family:Arial;margin:24px;background:#f5f5f5;color:#222}}main{{background:white;padding:24px;border-radius:12px}}table{{border-collapse:collapse;width:100%}}td,th{{padding:12px;border-bottom:1px solid #ddd;text-align:left}}.table{{overflow:auto}}input,select,button{{padding:10px;margin:5px}}a{{color:#222}}</style></head><body><main><a href="/command-center">← Command Center</a><h1>ESONE Operations</h1><p><a href="/calls/new">Record Call</a> · <a href="/demos">Demo Bookings</a></p><p>Business date: {business_today()} (India). {len(rows)} matching records.</p><form><select name="kind">{opts}</select><input name="q" aria-label="Search salon or phone" value="{escape(q,quote=True)}" placeholder="Salon / phone"><label>From <input type="date" name="start" value="{start or ''}"></label><label>To <input type="date" name="end" value="{end or ''}"></label><button>Apply</button></form><a href="/reports/export?{escape(params,quote=True)}">Download filtered Excel</a><p>Courtesy calls become due 7 days after the latest completed visit. CONTACTED courtesy outcomes clear the reminder for that visit.</p>{actions}<div class="table"><table><tr>{headings}</tr>{body}</table></div></main><script>document.querySelector('form').addEventListener('submit',()=>{{document.querySelectorAll('input[type=date]').forEach(x=>{{if(!x.value)x.disabled=true}})}})</script></body></html>'''
 
 
 @router.get("/reports/export")
