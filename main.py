@@ -1,3 +1,7 @@
+import os
+from html import escape
+from secrets import token_urlsafe
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
@@ -8,14 +12,14 @@ from modules.security import verify_password
 from modules.users import create_user, get_all_users
 
 
-app = FastAPI(title="Earthshine One")
+app = FastAPI(title="ESONE")
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key="ES1-DEVELOPMENT-SECRET-CHANGE-LATER",
+    secret_key=os.getenv("SESSION_SECRET") or token_urlsafe(48),
     max_age=60 * 60 * 8,
     same_site="lax",
-    https_only=False
+    https_only=os.getenv("RENDER", "").lower() == "true"
 )
 
 
@@ -23,13 +27,14 @@ def login_page(error=""):
     error_html = ""
 
     if error:
-        error_html = f'<div class="error">{error}</div>'
+        error_html = f'<div class="error">{escape(str(error))}</div>'
 
     return f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Earthshine One | Login</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>ESONE | Login</title>
 
         <style>
             * {{
@@ -48,7 +53,7 @@ def login_page(error=""):
             }}
 
             .login-box {{
-                width: 390px;
+                width: min(390px, 94vw);
                 padding: 45px;
                 background: #171717;
                 border: 1px solid #333;
@@ -115,10 +120,10 @@ def login_page(error=""):
 
         <div class="login-box">
 
-            <h1>EARTHSHINE <span class="gold">ONE</span></h1>
+            <h1>ES<span class="gold">ONE</span></h1>
 
             <div class="subtitle">
-                ES1 Business Management System
+                ESONE Business Management System
             </div>
 
             {error_html}
@@ -142,7 +147,7 @@ def login_page(error=""):
                 >
 
                 <button type="submit">
-                    LOGIN TO ES1
+                    LOGIN TO ESONE
                 </button>
 
             </form>
@@ -154,6 +159,7 @@ def login_page(error=""):
     """
 
 
+@app.get("/login", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if request.session.get("user_id"):
@@ -189,7 +195,7 @@ def login(
 
         if not user.is_active:
             return HTMLResponse(
-                login_page("This ES1 account is inactive."),
+                login_page("This ESONE account is inactive."),
                 status_code=403
             )
 
@@ -226,14 +232,14 @@ def command_center(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/", status_code=303)
 
-    name = request.session.get("full_name")
+    name = escape(str(request.session.get("full_name") or ""))
     role = request.session.get("role")
 
     return f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>ES1 Command Center</title>
+        <title>ESONE Command Center</title>
 
         <style>
             body {{
@@ -288,7 +294,7 @@ def command_center(request: Request):
         <header>
 
             <div class="brand">
-                EARTHSHINE <span class="gold">ONE</span>
+                ES<span class="gold">ONE</span>
             </div>
 
             <a href="/logout">Logout</a>
@@ -306,10 +312,10 @@ def command_center(request: Request):
                     <span class="role">{role}</span>
                 </p>
 
-                <h3>ES1 COMMAND CENTER</h3>
+                <h3>ESONE COMMAND CENTER</h3>
 
                 <p>
-                    Authentication successful.
+                    <a href="/visits">Field Visits</a> · <a href="/operations">Courtesy Calls / PTP / Reports</a>
                 </p>
 
                 <p style="margin-top:25px;">
@@ -351,9 +357,9 @@ def users_page(request: Request):
 
         rows += f"""
         <tr>
-            <td>{user.full_name}</td>
-            <td>{user.email}</td>
-            <td>{user.role}</td>
+            <td>{escape(str(user.full_name))}</td>
+            <td>{escape(str(user.email))}</td>
+            <td>{escape(str(user.role))}</td>
             <td>{status}</td>
         </tr>
         """
@@ -363,7 +369,7 @@ def users_page(request: Request):
     <html>
     <head>
 
-        <title>ES1 | User Management</title>
+        <title>ESONE | User Management</title>
 
         <style>
 
@@ -461,7 +467,7 @@ def users_page(request: Request):
         <header>
 
             <div class="brand">
-                EARTHSHINE <span class="gold">ONE</span>
+                ES<span class="gold">ONE</span>
             </div>
 
             <a href="/command-center">
@@ -476,7 +482,7 @@ def users_page(request: Request):
 
             <div class="panel">
 
-                <h2>Create ES1 User</h2>
+                <h2>Create ESONE User</h2>
 
                 <form method="post" action="/users/create">
 
@@ -502,7 +508,7 @@ def users_page(request: Request):
                         required
                     >
 
-                    <label>ES1 Role</label>
+                    <label>ESONE Role</label>
 
                     <select name="role" required>
                         <option value="SALES">Sales Employee</option>
@@ -520,7 +526,7 @@ def users_page(request: Request):
 
             <div class="panel">
 
-                <h2>ES1 Users</h2>
+                <h2>ESONE Users</h2>
 
                 <table>
 
@@ -573,7 +579,7 @@ def create_es1_user(
     if not success:
         return HTMLResponse(
             f"""
-            <h2>{message}</h2>
+            <h2>{escape(str(message))}</h2>
             <a href="/users">Return to User Management</a>
             """,
             status_code=400
@@ -593,7 +599,13 @@ def mobile_home(request: Request):
     if request.session.get("role") != "SALES":
         return RedirectResponse("/command-center", status_code=303)
 
-    name = request.session.get("full_name")
+    name = escape(str(request.session.get("full_name") or ""))
+
+    with SessionLocal() as db:
+        visits_today = db.query(Visit).join(Activity,Activity.id==Visit.activity_id).filter(
+            Activity.assigned_user_id==request.session.get("user_id"),
+            Visit.check_in_at >= datetime.combine(datetime.now().date(), datetime.min.time())
+        ).count()
 
     return f"""
     <!DOCTYPE html>
@@ -603,7 +615,7 @@ def mobile_home(request: Request):
         <meta name="viewport"
               content="width=device-width, initial-scale=1">
 
-        <title>Earthshine One | Mobile</title>
+        <title>ESONE | Mobile</title>
 
         <style>
 
@@ -710,7 +722,7 @@ def mobile_home(request: Request):
         <div class="mobile">
 
             <div class="brand">
-                EARTHSHINE <span class="gold">ONE</span>
+                ES<span class="gold">ONE</span>
             </div>
 
             <div class="welcome">
@@ -730,18 +742,18 @@ def mobile_home(request: Request):
                 <div class="stats">
 
                     <div class="stat">
-                        <div class="number">0</div>
+                        <div class="number">{visits_today}</div>
                         <div class="label">VISITS</div>
                     </div>
 
                     <div class="stat">
-                        <div class="number">0</div>
-                        <div class="label">ORDERS</div>
+                        <div class="number">—</div>
+                        <div class="label">ORDERS (COMING SOON)</div>
                     </div>
 
                     <div class="stat">
-                        <div class="number">₹0</div>
-                        <div class="label">COLLECTION</div>
+                        <div class="number">—</div>
+                        <div class="label">COLLECTION (COMING SOON)</div>
                     </div>
 
                 </div>
@@ -794,26 +806,26 @@ def clients_page(request: Request, q: str = ""):
             rows += f"""
             <tr>
                 <td>{c.id}</td>
-                <td><strong>{c.business_name}</strong><br><small>{c.contact_person or ""}</small></td>
-                <td>{c.phone or ""}<br><small>{c.alternate_phone or ""}</small></td>
-                <td>{c.area or ""}<br><small>{c.city or ""}</small></td>
-                <td>{c.client_category or ""}</td>
-                <td>{c.client_type or ""}</td>
-                <td>{assigned}</td>
-                <td>{c.status or ""}</td>
+                <td><strong><a href="/clients/{c.id}/timeline">{escape(c.business_name)}</a></strong><br><small>{escape(str(c.contact_person or ""))}</small></td>
+                <td>{escape(str(c.phone or ""))}<br><small>{escape(str(c.alternate_phone or ""))}</small></td>
+                <td>{escape(str(c.area or ""))}<br><small>{escape(str(c.city or ""))}</small></td>
+                <td>{escape(str(c.client_category or ""))}</td>
+                <td>{escape(str(c.client_type or ""))}</td>
+                <td>{escape(str(assigned))}</td>
+                <td>{escape(str(c.status or ""))}</td>
             </tr>
             """
 
         sales_options = '<option value="">Unassigned</option>'
         for u in sales_users:
-            sales_options += f'<option value="{u.id}">{u.full_name}</option>'
+            sales_options += f'<option value="{u.id}">{escape(str(u.full_name))}</option>'
 
         return f"""
         <!DOCTYPE html>
         <html>
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>ES1 | CRM Client Master</title>
+            <title>ESONE | CRM Client Master</title>
             <style>
                 * {{ box-sizing:border-box; }}
                 body {{ margin:0;background:#101010;color:white;font-family:Arial,sans-serif; }}
@@ -845,7 +857,7 @@ def clients_page(request: Request, q: str = ""):
         </head>
         <body>
             <header>
-                <div class="brand">EARTHSHINE <span class="gold">ONE</span> / CRM</div>
+                <div class="brand">ES<span class="gold">ONE</span> / CRM</div>
                 <div><a href="/command-center">Command Center</a> &nbsp; | &nbsp; <a href="/logout">Logout</a></div>
             </header>
 
@@ -899,7 +911,7 @@ def clients_page(request: Request, q: str = ""):
                 <div class="panel">
                     <div class="toolbar">
                         <form method="get" action="/clients" style="display:flex;gap:10px;width:100%;">
-                            <input name="q" value="{search}" placeholder="Search name, mobile, area or city">
+                            <input name="q" value="{escape(search, quote=True)}" placeholder="Search name, mobile, area or city">
                             <button type="submit">SEARCH</button>
                         </form>
                     </div>
@@ -977,7 +989,7 @@ from datetime import datetime, timedelta
 import hashlib, math, secrets
 from database.models import Activity, Visit, VerificationOTP, AuditLog, CommunicationLog
 
-VISIT_RADIUS_METERS = 250
+VISIT_RADIUS_METERS = 200
 
 def _distance_m(lat1, lon1, lat2, lon2):
     r=6371000
@@ -992,6 +1004,10 @@ def _otp_hash(code):
 def _visit_access(request):
     return request.session.get("role") in {"SUPER_ADMIN","MANAGEMENT","OFFICE","SALES"}
 
+def _owns_visit(request, activity):
+    return _visit_access(request) and (request.session.get("role") != "SALES" or activity.assigned_user_id == request.session.get("user_id"))
+
+
 @app.get("/visits", response_class=HTMLResponse)
 def visits_page(request: Request):
     if not request.session.get("user_id"): return RedirectResponse("/",303)
@@ -1001,12 +1017,12 @@ def visits_page(request: Request):
         q=db.query(Activity,Visit,Client).join(Visit,Visit.activity_id==Activity.id).join(Client,Client.id==Activity.client_id)
         if request.session.get("role")=="SALES": q=q.filter(Activity.assigned_user_id==request.session.get("user_id"))
         items=q.order_by(Activity.id.desc()).limit(100).all()
-        rows="".join([f'<tr><td>{a.id}</td><td>{c.business_name}</td><td>{v.visit_type}</td><td>{a.status}</td><td>{v.location_status or "-"}</td><td><a href="/visits/{a.id}">OPEN</a></td></tr>' for a,v,c in items])
+        rows="".join([f'<tr><td>{a.id}</td><td>{escape(str(c.business_name))}</td><td>{escape(str(v.visit_type))}</td><td>{escape(str(a.status))}</td><td>{"VERIFIED" if v.check_in_at else "PENDING"}</td><td><a href="/visits/{a.id}">OPEN</a></td></tr>' for a,v,c in items])
         clients=db.query(Client).order_by(Client.business_name).all()
-        opts="".join([f'<option value="{c.id}">{c.business_name} — {c.area or c.city or ""}</option>' for c in clients])
-        return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ES1 Visits</title>
+        opts="".join([f'<option value="{c.id}">{escape(str(c.business_name))} — {escape(str(c.area or c.city or ""))}</option>' for c in clients])
+        return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE Visits</title>
 <style>body{{font-family:Arial;background:#f4f4f4;color:#222;margin:0}}header{{background:#fff;border-bottom:1px solid #ddd;padding:18px 24px;display:flex;justify-content:space-between}}main{{max-width:1100px;margin:auto;padding:24px}}.card{{background:white;border:1px solid #ddd;border-radius:14px;padding:20px;margin-bottom:20px}}select,button{{padding:12px;border:1px solid #bbb;border-radius:8px}}button{{background:#222;color:#fff;font-weight:bold}}table{{width:100%;border-collapse:collapse}}th,td{{padding:12px;border-bottom:1px solid #eee;text-align:left}}a{{color:#222}}</style></head><body>
-<header><strong>EARTHSHINE ONE / FIELD VISITS</strong><a href="/mobile">Home</a></header><main>
+<header><strong>ESONE / FIELD VISITS</strong><a href="/mobile">Home</a></header><main>
 <div class="card"><h2>New Field Visit</h2><form method="post" action="/visits/create"><select name="client_id" required><option value="">Select Salon</option>{opts}</select> <select name="visit_type"><option>SALES</option><option>COURTESY</option><option>COLLECTION</option></select> <button>CREATE VISIT</button></form><p>Visit start માટે GPS/location ફરજિયાત છે. Customer OTP માત્ર visit complete કરતી વખતે જરૂરી છે.</p></div>
 <div class="card"><h2>Visits</h2><table><tr><th>ID</th><th>Salon</th><th>Type</th><th>Status</th><th>Location</th><th></th></tr>{rows}</table></div></main></body></html>'''
     finally: db.close()
@@ -1016,6 +1032,9 @@ def create_visit(request:Request, client_id:int=Form(...), visit_type:str=Form(.
     if not request.session.get("user_id"): return RedirectResponse("/",303)
     db=SessionLocal()
     try:
+        if not _visit_access(request):return HTMLResponse("Access Denied",403)
+        if visit_type.upper() not in {"SALES","COURTESY","COLLECTION"}:return HTMLResponse("Invalid visit type",400)
+        if not db.get(Client,client_id):return HTMLResponse("Client not found",404)
         a=Activity(client_id=client_id,activity_type="FIELD_VISIT",source="FIELD",status="CREATED",title=f"{visit_type.upper()} Visit",assigned_user_id=request.session.get("user_id"),created_by=request.session.get("user_id"))
         db.add(a); db.flush(); v=Visit(activity_id=a.id,visit_type=visit_type.upper()); db.add(v); db.commit()
         return RedirectResponse(f"/visits/{a.id}",303)
@@ -1029,6 +1048,7 @@ def visit_detail(activity_id:int, request:Request):
         row=db.query(Activity,Visit,Client).join(Visit,Visit.activity_id==Activity.id).join(Client,Client.id==Activity.client_id).filter(Activity.id==activity_id).first()
         if not row:return HTMLResponse("Visit not found",404)
         a,v,c=row
+        if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
         gps_registered=c.latitude is not None and c.longitude is not None
         start_block='''<button onclick="startVisit()">VERIFY LOCATION & START VISIT</button><div id="geo"></div>''' if a.status=="CREATED" else ""
         end_block='''<form method="post" action="/visits/%s/request-end-otp"><label>Outcome / Notes</label><input name="notes" style="width:100%%;padding:12px;margin:8px 0" required><button>SEND END OTP</button></form>'''%activity_id if a.status=="IN_PROGRESS" else ""
@@ -1037,7 +1057,7 @@ def visit_detail(activity_id:int, request:Request):
         if otp:
             otp_block=f'''<form method="post" action="/visits/{activity_id}/verify-end-otp"><h3>Customer End OTP</h3><input name="otp" inputmode="numeric" maxlength="6" required><button>VERIFY & COMPLETE</button></form>'''
         register_note="Salon GPS not registered. Current verified location will be registered when visit starts." if not gps_registered else f"Registered GPS: {c.latitude:.5f}, {c.longitude:.5f} (allowed radius {VISIT_RADIUS_METERS}m)"
-        return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Visit</title><style>body{{font-family:Arial;background:#f4f4f4;margin:0}}main{{max-width:650px;margin:auto;padding:22px}}.card{{background:#fff;padding:22px;border:1px solid #ddd;border-radius:14px}}button,input{{padding:13px;border-radius:8px;border:1px solid #bbb;margin:6px 0}}button{{background:#222;color:white;font-weight:bold}}.ok{{color:green}}</style></head><body><main><a href="/visits">← Visits</a><div class="card"><h2>{v.visit_type} VISIT</h2><h3>{c.business_name}</h3><p>Status: <b>{a.status}</b></p><p>Location: {register_note}</p>{start_block}{end_block}{otp_block}</div></main>
+        return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Visit</title><style>body{{font-family:Arial;background:#f4f4f4;margin:0}}main{{max-width:650px;margin:auto;padding:22px}}.card{{background:#fff;padding:22px;border:1px solid #ddd;border-radius:14px}}button,input{{padding:13px;border-radius:8px;border:1px solid #bbb;margin:6px 0}}button{{background:#222;color:white;font-weight:bold}}.ok{{color:green}}</style></head><body><main><a href="/visits">← Visits</a><div class="card"><h2>{escape(str(v.visit_type))} VISIT</h2><h3>{escape(str(c.business_name))}</h3><p>Status: <b>{escape(str(a.status))}</b></p><p>Location: {register_note}</p>{start_block}{end_block}{otp_block}</div></main>
 <script>function startVisit(){{if(!navigator.geolocation){{alert('GPS not supported');return}};document.getElementById('geo').innerText='Getting location...';navigator.geolocation.getCurrentPosition(async p=>{{let f=new FormData();f.append('latitude',p.coords.latitude);f.append('longitude',p.coords.longitude);let r=await fetch('/visits/{activity_id}/start',{{method:'POST',body:f}});let t=await r.text();if(r.ok)location.reload();else document.getElementById('geo').innerHTML=t;}},e=>{{document.getElementById('geo').innerText='Location permission/GPS required: '+e.message}},{{enableHighAccuracy:true,timeout:15000}})}};</script></body></html>'''
     finally: db.close()
 
@@ -1048,15 +1068,18 @@ def start_visit(activity_id:int,request:Request,latitude:float=Form(...),longitu
     try:
         a=db.query(Activity).filter(Activity.id==activity_id).first(); v=db.query(Visit).filter(Visit.activity_id==activity_id).first()
         if not a or not v:return HTMLResponse("Visit not found",404)
+        if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
+        if a.status != "CREATED":return HTMLResponse("Visit has already started or completed",409)
+        if not (math.isfinite(latitude) and math.isfinite(longitude) and -90<=latitude<=90 and -180<=longitude<=180):return HTMLResponse("Invalid GPS coordinates",400)
         c=db.query(Client).filter(Client.id==a.client_id).first()
+        if not c:return HTMLResponse("Client not found",404)
         if c.latitude is None or c.longitude is None:
-            c.latitude,c.longitude=latitude,longitude; v.location_status="REGISTERED"; dist=0
+            c.latitude,c.longitude=latitude,longitude; dist=0
         else:
             dist=_distance_m(latitude,longitude,c.latitude,c.longitude)
             if dist>VISIT_RADIUS_METERS:return HTMLResponse(f"Location mismatch: approx {dist:.0f}m from registered salon location. Visit cannot start.",409)
-            v.location_status="VERIFIED"
-        v.location_distance_m=dist;v.check_in_latitude=latitude;v.check_in_longitude=longitude;v.check_in_at=datetime.now();a.status="IN_PROGRESS"
-        db.add(AuditLog(user_id=request.session.get("user_id"),entity_type="VISIT",entity_id=v.id,action="START",new_value=f"location={v.location_status};distance_m={dist:.1f}"));db.commit();return HTMLResponse("OK")
+        v.check_in_latitude=latitude;v.check_in_longitude=longitude;v.check_in_at=datetime.now();a.status="IN_PROGRESS"
+        db.add(AuditLog(user_id=request.session.get("user_id"),entity_type="VISIT",entity_id=v.id,action="START",new_value=f"distance_m={dist:.1f}"));db.commit();return HTMLResponse("OK")
     finally:db.close()
 
 @app.post("/visits/{activity_id}/request-end-otp")
@@ -1064,11 +1087,17 @@ def request_visit_end_otp(activity_id:int,request:Request,notes:str=Form("")):
     if not request.session.get("user_id"):return RedirectResponse("/",303)
     db=SessionLocal()
     try:
-        a=db.query(Activity).filter(Activity.id==activity_id).first();v=db.query(Visit).filter(Visit.activity_id==activity_id).first();c=db.query(Client).filter(Client.id==a.client_id).first()
+        a=db.query(Activity).filter(Activity.id==activity_id).first();v=db.query(Visit).filter(Visit.activity_id==activity_id).first()
+        if not a or not v:return HTMLResponse("Visit not found",404)
+        if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
+        c=db.get(Client,a.client_id)
+        if not c:return HTMLResponse("Client not found",404)
+        if os.getenv("ESONE_ENV") != "test":return HTMLResponse("Customer OTP delivery is not configured. Contact management; no OTP was sent.",503)
         if a.status!="IN_PROGRESS":return HTMLResponse("Visit is not in progress",409)
         code=f"{secrets.randbelow(900000)+100000}"
         otp=VerificationOTP(client_id=c.id,activity_id=a.id,purpose="VISIT_END",otp_hash=_otp_hash(code),recipient=c.whatsapp_phone or c.phone,status="PENDING",expires_at=datetime.now()+timedelta(minutes=10))
-        v.end_notes=notes;v.end_otp_status="SENT";db.add(otp)
+        db.query(VerificationOTP).filter(VerificationOTP.activity_id==a.id,VerificationOTP.purpose=="VISIT_END",VerificationOTP.status=="PENDING").update({"status":"SUPERSEDED"})
+        a.notes=notes;db.add(otp)
         db.add(CommunicationLog(client_id=c.id,activity_id=a.id,channel="WHATSAPP",purpose="VISIT_END_OTP",recipient=c.whatsapp_phone or c.phone,message_text="Visit completion verification OTP",send_mode="AUTO",status="QUEUED",created_by=request.session.get("user_id")))
         db.commit()
         # Until Meta WhatsApp API credentials are connected, expose a local test OTP so the workflow can be tested end-to-end.
@@ -1081,9 +1110,53 @@ def verify_visit_end_otp(activity_id:int,request:Request,otp:str=Form(...)):
     db=SessionLocal()
     try:
         a=db.query(Activity).filter(Activity.id==activity_id).first();v=db.query(Visit).filter(Visit.activity_id==activity_id).first()
+        if not a or not v:return HTMLResponse("Visit not found",404)
+        if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
+        if a.status!="IN_PROGRESS":return HTMLResponse("Visit is not in progress",409)
         rec=db.query(VerificationOTP).filter(VerificationOTP.activity_id==activity_id,VerificationOTP.purpose=="VISIT_END",VerificationOTP.status=="PENDING").order_by(VerificationOTP.id.desc()).first()
         if not rec or rec.expires_at<datetime.now():return HTMLResponse("OTP expired. Request a new OTP.",409)
         if rec.otp_hash!=_otp_hash(otp.strip()):return HTMLResponse("Invalid OTP",400)
-        rec.status="VERIFIED";rec.verified_at=datetime.now();v.end_otp_status="VERIFIED";v.end_otp_verified_at=datetime.now();v.check_out_at=datetime.now();a.status="COMPLETED";a.completed_at=datetime.now()
+        rec.status="VERIFIED";rec.verified_at=datetime.now();v.check_out_at=datetime.now();a.status="COMPLETED";a.completed_at=datetime.now()
         db.add(AuditLog(user_id=request.session.get("user_id"),entity_type="VISIT",entity_id=v.id,action="COMPLETE_OTP_VERIFIED",new_value="customer OTP verified"));db.commit();return RedirectResponse(f"/visits/{activity_id}",303)
     finally:db.close()
+
+
+@app.get("/**", include_in_schema=False)
+def copied_wildcard_url():
+    """Recover the literal wildcard accidentally copied into the browser URL."""
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/health", include_in_schema=False)
+def health():
+    # Liveness must never initialize, seed, or mutate the database.
+    return {"status": "ok", "service": "ESONE"}
+
+
+from modules.operations import router as operations_router
+app.include_router(operations_router)
+
+@app.middleware("http")
+async def database_error_page(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except SQLAlchemyError:
+        # Do not expose database URLs, SQL, parameters, or credentials.
+        return HTMLResponse("<h1>ESONE temporarily unavailable</h1><p>The database needs an administrator check. No automatic database changes were made.</p><a href='/'>Return to login</a>",status_code=503)
+
+
+@app.get("/health/ready", include_in_schema=False)
+def database_readiness():
+    from sqlalchemy import inspect
+    from database.db import engine, Base
+    try:
+        inspector = inspect(engine)
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                return HTMLResponse("Database setup needs administrator review",503)
+            actual = {column["name"] for column in inspector.get_columns(table.name)}
+            if not {column.name for column in table.columns}.issubset(actual):
+                return HTMLResponse("Database schema needs administrator review",503)
+        return {"status":"ready","service":"ESONE"}
+    except SQLAlchemyError:
+        return HTMLResponse("Database connection needs administrator review",503)

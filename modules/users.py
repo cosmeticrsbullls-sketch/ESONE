@@ -26,8 +26,11 @@ def create_user(full_name, email, password, role):
     if len(password) < 8:
         return False, "Password must contain at least 8 characters."
 
+    if len(password.encode("utf-8")) > 72:
+        return False, "Password must be at most 72 UTF-8 bytes."
+
     if role not in VALID_ROLES:
-        return False, "Invalid ES1 role."
+        return False, "Invalid ESONE role."
 
     db = SessionLocal()
 
@@ -53,7 +56,7 @@ def create_user(full_name, email, password, role):
         db.add(user)
         db.commit()
 
-        return True, "ES1 user created successfully."
+        return True, "ESONE user created successfully."
 
     finally:
         db.close()
