@@ -958,12 +958,12 @@ def visits_page(request: Request):
         if request.session.get("role")=="SALES": q=q.filter(Activity.assigned_user_id==request.session.get("user_id"))
         items=q.order_by(Activity.id.desc()).limit(100).all()
         rows="".join([f'<tr><td>{a.id}</td><td>{escape(str(c.business_name))}</td><td>{escape(str(v.visit_type))}</td><td>{escape(str(a.status))}</td><td>{"VERIFIED" if v.check_in_at else "PENDING"}</td><td><a href="/visits/{a.id}">OPEN</a></td></tr>' for a,v,c in items])
-        clients=db.query(Client).order_by(Client.business_name).all()
-        opts="".join([f'<option value="{c.id}">{escape(str(c.business_name))} — {escape(str(c.area or c.city or ""))}</option>' for c in clients])
+        from modules.field_intake import intake
+        new_visit=intake(request)
         return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE Visits</title>
 <style>body{{font-family:Arial;background:#f4f4f4;color:#222;margin:0}}header{{background:#fff;border-bottom:1px solid #ddd;padding:18px 24px;display:flex;justify-content:space-between}}main{{max-width:1100px;margin:auto;padding:24px}}.card{{background:white;border:1px solid #ddd;border-radius:14px;padding:20px;margin-bottom:20px}}select,button{{padding:12px;border:1px solid #bbb;border-radius:8px}}button{{background:#222;color:#fff;font-weight:bold}}table{{width:100%;border-collapse:collapse}}th,td{{padding:12px;border-bottom:1px solid #eee;text-align:left}}a{{color:#222}}</style></head><body>
 <header><strong>ESONE / FIELD VISITS</strong><a href="/mobile">Home</a></header><main>
-<div class="card"><h2>New Field Visit</h2><form method="post" action="/visits/create"><select name="client_id" required><option value="">Select Salon</option>{opts}</select> <select name="visit_type"><option>SALES</option><option>COURTESY</option><option>COLLECTION</option></select> <button>CREATE VISIT</button></form><p>Visit start માટે GPS/location ફરજિયાત છે. Customer OTP માત્ર visit complete કરતી વખતે જરૂરી છે.</p></div>
+{new_visit}
 <div class="card"><h2>Visits</h2><table><tr><th>ID</th><th>Salon</th><th>Type</th><th>Status</th><th>Location</th><th></th></tr>{rows}</table></div></main></body></html>'''
     finally: db.close()
 
@@ -1153,3 +1153,7 @@ def mobile_icon(icon_name: str):
     if icon_name not in {"icon-192.png", "icon-512.png", "apple-touch-icon.png"}:
         return Response(status_code=404)
     return FileResponse(LOGO_PATH.parent / icon_name, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
+
+
+from modules.field_intake import router as field_intake_router
+app.include_router(field_intake_router)
