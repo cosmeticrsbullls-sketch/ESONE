@@ -11,7 +11,11 @@ DATABASE_URL = os.getenv(
     f"sqlite:///{(BASE_DIR / 'es1.db').as_posix()}"
 )
 
-engine_kwargs = {}
+# Render may supply the legacy postgres:// scheme.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
+
+engine_kwargs = {"pool_pre_ping": True}
 
 if DATABASE_URL.startswith("sqlite"):
     engine_kwargs["connect_args"] = {"check_same_thread": False}
