@@ -14,6 +14,9 @@ from modules.users import create_user, get_all_users
 
 app = FastAPI(title="ESONE")
 
+from modules.privacy import router as privacy_router
+app.include_router(privacy_router)
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET") or token_urlsafe(48),
@@ -1151,6 +1154,8 @@ def esone_stylesheet():
 @app.middleware("http")
 async def esone_presentation(request: Request, call_next):
     response = await call_next(request)
+    if request.url.path in {"/privacy-policy", "/data-deletion"}:
+        return response
     if "text/html" not in response.headers.get("content-type", ""):
         return response
     body = b"".join([chunk async for chunk in response.body_iterator])
