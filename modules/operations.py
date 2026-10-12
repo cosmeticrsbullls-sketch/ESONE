@@ -134,11 +134,13 @@ def operations(request: Request, kind: str="courtesy", q: str="", start: date|No
         for row in rows:
             url = f"/calls/new?client_id={row[0]}&kind=COURTESY_CALL" if kind=="courtesy" else f"/ptps/{row[0]}" if kind=="ptp" else f"/demos/{row[0]}"
             actions += f'<p><a href="{escape(url,quote=True)}">{escape(str(row[2] if kind!="courtesy" else row[1]))} — {"Record Courtesy Call" if kind=="courtesy" else "Follow Up" if kind=="ptp" else "Demo Details"}</a></p>'
+    from modules.pdf_reports import share_button,SHARE_SCRIPT
+    sharing=share_button('/reports/pdf?'+params)+SHARE_SCRIPT
     headings="".join(f"<th>{escape(h)}</th>" for h in headers)
     body="".join("<tr>"+"".join(f"<td>{escape(str(v if v is not None else ''))}</td>" for v in row)+"</tr>" for row in rows)
     if not body:body=f'<tr><td colspan="{len(headers)}">No matching records.</td></tr>'
     opts="".join(f'<option value="{key}" {"selected" if key==kind else ""}>{label}</option>' for key,label in [("courtesy","7-Day Courtesy Calls"),("ptp","PTP Due Today / Overdue"),("visits","Visit History"),("calls","Call History"),("demos","Demo History")])
-    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE Operations</title><style>body{{font-family:Arial;margin:24px;background:#f5f5f5;color:#222}}main{{background:white;padding:24px;border-radius:12px}}table{{border-collapse:collapse;width:100%}}td,th{{padding:12px;border-bottom:1px solid #ddd;text-align:left}}.table{{overflow:auto}}input,select,button{{padding:10px;margin:5px}}a{{color:#222}}</style></head><body><main><a href="/command-center">← Command Center</a><h1>ESONE Operations</h1><p><a href="/calls/new">Record Call</a> · <a href="/demos">Demo Bookings</a></p><p>Business date: {business_today()} (India). {len(rows)} matching records.</p><form><select name="kind">{opts}</select><input name="q" aria-label="Search salon or phone" value="{escape(q,quote=True)}" placeholder="Salon / phone"><label>From <input type="date" name="start" value="{start or ''}"></label><label>To <input type="date" name="end" value="{end or ''}"></label><button>Apply</button></form><a href="/reports/export?{escape(params,quote=True)}">Download filtered Excel</a><p>Courtesy calls become due 7 days after the latest completed visit. CONTACTED courtesy outcomes clear the reminder for that visit.</p>{actions}<div class="table"><table><tr>{headings}</tr>{body}</table></div></main><script>document.querySelector('form').addEventListener('submit',()=>{{document.querySelectorAll('input[type=date]').forEach(x=>{{if(!x.value)x.disabled=true}})}})</script></body></html>'''
+    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE Operations</title><style>body{{font-family:Arial;margin:24px;background:#f5f5f5;color:#222}}main{{background:white;padding:24px;border-radius:12px}}table{{border-collapse:collapse;width:100%}}td,th{{padding:12px;border-bottom:1px solid #ddd;text-align:left}}.table{{overflow:auto}}input,select,button{{padding:10px;margin:5px}}a{{color:#222}}</style></head><body><main><a href="/command-center">← Command Center</a><h1>ESONE Operations</h1><p><a href="/calls/new">Record Call</a> · <a href="/demos">Demo Bookings</a></p><p>Business date: {business_today()} (India). {len(rows)} matching records.</p><form><select name="kind">{opts}</select><input name="q" aria-label="Search salon or phone" value="{escape(q,quote=True)}" placeholder="Salon / phone"><label>From <input type="date" name="start" value="{start or ''}"></label><label>To <input type="date" name="end" value="{end or ''}"></label><button>Apply</button></form><a href="/reports/export?{escape(params,quote=True)}">Download filtered Excel</a>{sharing}<p>Courtesy calls become due 7 days after the latest completed visit. CONTACTED courtesy outcomes clear the reminder for that visit.</p>{actions}<div class="table"><table><tr>{headings}</tr>{body}</table></div></main><script>document.querySelector('form').addEventListener('submit',()=>{{document.querySelectorAll('input[type=date]').forEach(x=>{{if(!x.value)x.disabled=true}})}})</script></body></html>'''
 
 
 @router.get("/reports/export")
@@ -161,3 +163,14 @@ def timeline(client_id:int,request:Request):
         records=db.query(Activity).filter(Activity.client_id==client_id).order_by(Activity.created_at.desc(),Activity.id.desc()).all()
         items="".join(f'<li><strong>{escape(a.activity_type)} — {escape(a.status or "")}</strong> · {a.created_at}<p>{escape(a.title or "")} {escape(a.notes or "")}</p></li>' for a in records)
         return f'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE Timeline</title></head><body style="font-family:Arial;padding:24px"><a href="/clients">← Clients</a><h1>{escape(client.business_name)} — Activity Timeline</h1><ol>{items or "<li>No recorded activities.</li>"}</ol></body></html>'
+
+
+@router.get('/reports/pdf')
+def report_pdf(request:Request,kind:str='courtesy',q:str='',start:date|None=None,end:date|None=None):
+    denied=access(request)
+    if denied is not None:return denied
+    with SessionLocal() as db:
+        try:headers,rows=queues(db,kind,q,start,end)
+        except ValueError as error:return HTMLResponse(escape(str(error)),400)
+    from modules.pdf_reports import pdf_response
+    return pdf_response(kind.title(),headers,rows,'ESONE_'+kind+'.pdf',f'From {start or "all"} to {end or "all"} | Search: {q}')

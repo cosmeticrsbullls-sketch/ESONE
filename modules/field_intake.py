@@ -55,14 +55,16 @@ def intake(request):
 
 
 @router.get('/field/intake', response_class=HTMLResponse)
-def intake_page(request: Request):
+def intake_page(request: Request, visit_type: str="SALES"):
     if not request.session.get('user_id'):
         return RedirectResponse('/login', 303)
     denied = access(request)
     if denied is not None:
         return denied
     from modules.workflows import page
-    return HTMLResponse(page('Start Sales / Collection Visit', intake(request)))
+    if visit_type not in {'SALES','COLLECTION','COURTESY'}:return HTMLResponse('Invalid visit purpose',400)
+    content=intake(request).replace(f'<option value="{visit_type}">',f'<option value="{visit_type}" selected>')
+    return HTMLResponse(page('Start Sales / Collection Visit', content))
 
 
 @router.get('/field/nearby')

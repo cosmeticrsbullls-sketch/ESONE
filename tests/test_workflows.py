@@ -46,10 +46,12 @@ class WorkflowTests(unittest.TestCase):
 
     def test_csrf_and_role_denials_leave_database_unchanged(self):
         self.login();data=self.call();data['csrf']='wrong'
+        for path in ['/demos','/demos/new']:self.assertEqual(self.client.get(path).status_code,200)
         self.assertEqual(self.client.post('/calls',data=data).status_code,403)
         self.client.get('/logout');self.login('a')
-        for path in ['/calls/new','/demos','/demos/new','/ptps/1']:
+        for path in ['/calls/new','/ptps/1']:
             self.assertEqual(self.client.get(path).status_code,403)
+        for path in ['/demos','/demos/new']:self.assertEqual(self.client.get(path).status_code,200)
         self.assertEqual(self.client.post('/calls',data=data).status_code,403)
         with SessionLocal() as db:self.assertEqual(db.query(PromiseToPay).count(),3)
 

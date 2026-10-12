@@ -37,17 +37,18 @@ def icon(key):
 
 def navigation(path, name, role):
     management=role in {'SUPER_ADMIN','MANAGEMENT','OFFICE'}
-    links=[('/workspace','Home','dashboard'),('/workspace/sales','Sales','visits'),('/workspace/collection','Collection','calls'),('/workspace/demo','Demo','demos')]
+    links=[('/workspace','Home','dashboard'),('/workspace/sales','Sales','visits'),('/workspace/collection','Collection','calls'),('/workspace/demo','Demo','demos'),('/orders','Book Order','reports'),('/attendance','Attendance','visits'),('/notifications','Notifications','calls')]
     if management:links += [('/command-center','Command Center','reports')]
     links += [('/account/password','Change Password','clients')]
-    items=''.join(f'<a href="{url}" class="{"active" if path==url or (url not in {"/command-center","/mobile","/calls/new"} and path.startswith(url+"/")) or (url=="/operations" and path.startswith("/ptps/")) else ""}">{icon(key)}{label}</a>' for url,label,key in links)
-    current=next((label for url,label,key in links if path==url or path.startswith(url+'/')),'Workspace')
+    items=''.join(f'<a href="{url}" class="{"active" if path==url or (url not in {"/workspace","/command-center","/mobile","/calls/new"} and path.startswith(url+"/")) or (url=="/operations" and path.startswith("/ptps/")) else ""}">{icon(key)}{label}</a>' for url,label,key in links)
+    current=next((label for url,label,key in sorted(links,key=lambda item:len(item[0]),reverse=True) if path==url or path.startswith(url+'/')),'Workspace')
+    dropdown='<label class="mobile-menu">Menu<select aria-label="Main menu" onchange="if(this.value)location.href=this.value">'+''.join(f'<option value="{url}" {"selected" if label==current else ""}>{label}</option>' for url,label,key in links)+'</select></label>'
     initial=escape((name or 'E')[0].upper())
-    return f'''<aside class="esone-sidebar" aria-label="Main navigation"><a class="esone-brand" href="/workspace">ES<span>ONE</span></a><div class="esone-caption">Business workspace</div>{brand_mark()}<div class="nav-label">WORKSPACE</div><nav class="esone-links">{items}</nav><div class="sidebar-foot">Earthshine business operations<br>One connected workspace.</div></aside><div class="esone-topbar"><div class="breadcrumb">Workspace / <strong>{current}</strong></div><div class="account"><span class="avatar">{initial}</span><div class="account-name">{escape(name)}<small>{escape(role.replace('_',' ').title())}</small></div><a class="logout" href="/logout">Sign out</a></div></div>'''
+    return f'''<aside class="esone-sidebar" aria-label="Main navigation"><a class="esone-brand" href="/workspace">ES<span>ONE</span></a><div class="esone-caption">Business workspace</div>{brand_mark()}<div class="nav-label">WORKSPACE</div><nav class="esone-links">{items}</nav>{dropdown}<div class="sidebar-foot">Earthshine business operations<br>One connected workspace.</div></aside><div class="esone-topbar"><div class="breadcrumb">Workspace / <strong>{current}</strong></div><div class="account"><span class="avatar">{initial}</span><div class="account-name">{escape(name)}<small>{escape(role.replace('_',' ').title())}</small></div><a class="logout" href="/logout">Sign out</a></div></div>'''
 
 def enhance(document, path, name='', role='', signed_in=False):
     if '</head>' not in document or '<body' not in document:return document
-    document=document.replace('</head>','<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/assets/esone.css?v=4"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png"><meta name="theme-color" content="#f5f6f8"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="ESONE"><meta name="apple-mobile-web-app-status-bar-style" content="default"></head>',1)
+    document=document.replace('</head>','<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/assets/esone.css?v=5"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png"><meta name="theme-color" content="#f5f6f8"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="ESONE"><meta name="apple-mobile-web-app-status-bar-style" content="default"></head>',1)
     start=document.index('<body');end=document.index('>',start)
     is_login=path in {'/','/login','/login/'} and not signed_in
     cls='esone-login' if is_login else 'esone-app'
@@ -62,4 +63,13 @@ def enhance(document, path, name='', role='', signed_in=False):
 CSS += """
 .workspace-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.workspace-buttons a{display:flex;align-items:center;justify-content:center;min-height:180px;font-size:32px;font-weight:700;border:1px solid #d7b666;border-radius:18px;background:#fff8e8}.esone-app img{max-width:100%;height:auto}.esone-app main{min-width:0}.esone-app textarea{width:100%;min-height:100px}.esone-app td{overflow-wrap:anywhere}
 @media(max-width:600px){.workspace-buttons{grid-template-columns:1fr}.workspace-buttons a{min-height:120px;font-size:30px}.esone-app .table table,.esone-app table{min-width:0!important}.esone-app table,.esone-app tbody,.esone-app tr,.esone-app td{display:block;width:100%}.esone-app thead,.esone-app tr:has(th){display:none}.esone-app tr{border:1px solid #ddd;border-radius:12px;margin:12px 0;padding:12px}.esone-app td{border:0;padding:7px 0}.esone-app td:before{content:attr(data-label);font-weight:600;display:block;font-size:12px;color:#697582}.esone-app input,.esone-app select{max-width:100%!important}.calendar-grid{overflow:hidden}}
+"""
+
+CSS += """
+body::before{content:'';position:fixed;inset:0;pointer-events:none;background-image:url('/assets/icon-192.png');background-repeat:repeat;background-size:130px 130px;opacity:.035;z-index:0}body>main,.login-box{position:relative;z-index:1}body.esone-app>main:not(.dashboard){background:#fffffff2!important}.mobile-menu{display:none}.full,.pdf-share{grid-column:1/-1}.workspace-buttons{grid-template-columns:repeat(4,minmax(0,1fr))}.workspace-buttons a{font-size:28px}.pdf-share{margin:18px 0}.pdf-share button{width:auto!important}.pdf-share p{font-size:12px}.workspace-buttons+.actions{margin-bottom:18px}.table input[type=number]{width:110px!important;min-width:85px}.table small{display:block}
+@media(max-width:900px){.esone-sidebar .esone-links{display:none}.mobile-menu{display:grid;gap:6px;color:#fff!important;margin-top:18px}.mobile-menu select{width:100%;max-width:100%!important}.workspace-buttons{grid-template-columns:1fr 1fr}.workspace-buttons a{min-height:120px;font-size:25px}}
+@media(max-width:420px){.workspace-buttons a{font-size:23px;min-height:100px}}
+"""
+CSS += """
+.esone-app main{background-image:linear-gradient(#ffffffed,#ffffffed),url('/assets/icon-192.png')!important;background-size:auto,150px 150px!important;background-repeat:repeat!important}.esone-app main.dashboard{background-color:transparent!important}.pdf-share{background:#ffffffcc;border-radius:12px;padding:14px}.workflow details{grid-column:1/-1}.workflow .full{grid-column:1/-1!important}
 """

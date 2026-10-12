@@ -16,9 +16,11 @@ def map_link(label, latitude, longitude):
 @router.get('/workspace', response_class=HTMLResponse)
 def workspace(request: Request):
     if not request.session.get('user_id'): return RedirectResponse('/',303)
-    content = '<div class="workspace-buttons"><a href="/workspace/sales">Sales</a><a href="/workspace/collection">Collection</a><a href="/workspace/demo">Demo</a></div>'
+    content = '<div class="workspace-buttons"><a href="/workspace/sales">Sales</a><a href="/workspace/collection">Collection</a><a href="/workspace/demo">Demo</a><a href="/orders/new">Book Order</a></div>'
     if request.session.get('role') in MANAGEMENT:
         content += '<p><a href="/command-center">Open Command Center</a></p>'
+    from modules.notifications import inbox_card
+    content += '<div class="actions"><a class="secondary" href="/attendance">Punch In / Out</a><a class="secondary" href="/activity-reports">My Daily / Monthly Reports</a></div>'+inbox_card(request)
     return HTMLResponse(page('Home',content))
 
 @router.get('/workspace/{section}', response_class=HTMLResponse)
@@ -26,9 +28,9 @@ def section(request: Request, section: str):
     if not request.session.get('user_id'): return RedirectResponse('/',303)
     management = request.session.get('role') in MANAGEMENT
     options = {
-      'sales':[('Start sales visit','/field/intake'),('My visits','/visits')]+([('Clients','/clients'),('Sales reports','/operations?kind=visits')] if management else []),
-      'collection':[('Start collection visit','/field/intake'),('My visits','/visits')]+([('Record collection call','/calls/new'),('Collection reports','/operations'),('Import bills and previous collections','/imports')] if management else []),
-      'demo':[]+([('Book and manage demos','/demos'),('Demo reports','/operations?kind=demos')] if management else [])}
+      'sales':[('Book Order','/orders/new'),('My orders','/orders'),('Start sales visit','/field/intake?visit_type=SALES'),('My visits','/visits')]+([('Clients','/clients'),('Sales reports','/operations?kind=visits')] if management else []),
+      'collection':[('Start collection visit','/field/intake?visit_type=COLLECTION'),('My visits','/visits')]+([('Record collection call','/calls/new'),('Collection reports','/operations'),('Import bills and previous collections','/imports')] if management else []),
+      'demo':[('Book Demo','/demos/new'),('Demo calendar','/demos')]+([('Demo reports','/operations?kind=demos')] if management else [])}
     if section not in options: return HTMLResponse('Not found',404)
     links=''.join(f'<p><a class="secondary" href="{url}">{label}</a></p>' for label,url in options[section])
     if section=='demo' and not management:
@@ -54,7 +56,7 @@ def management_close(activity_id:int, request:Request, reason:str=Form(...), csr
         db.add(AuditLog(user_id=request.session['user_id'],entity_type='VISIT',entity_id=activity_id,action='MANAGEMENT_CLOSE',old_value='IN_PROGRESS',new_value=reason))
         for otp in db.query(VerificationOTP).filter_by(activity_id=activity_id,purpose='VISIT_END',status='PENDING'):
             otp.status='CANCELLED'
-    return RedirectResponse(f'/visits/{activity_id}',303)
+    return RedirectResponse('/workspace',303)
 
 @router.get('/account/password', response_class=HTMLResponse)
 def password_page(request:Request):

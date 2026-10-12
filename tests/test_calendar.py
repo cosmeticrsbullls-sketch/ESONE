@@ -52,7 +52,7 @@ class CalendarTests(unittest.TestCase):
         with SessionLocal() as db:before=db.query(Activity).count()
         self.assertEqual(self.client.get('/demos?month=2028-02').status_code,200)
         with SessionLocal() as db:self.assertEqual(before,db.query(Activity).count())
-        self.client.get('/logout');self.login('a');self.assertEqual(self.client.get('/demos').status_code,403)
+        self.client.get('/logout');self.login('a');self.assertEqual(self.client.get('/demos').status_code,200)
 
     def test_empty_salon_options_are_explicit_and_registration_is_visible(self):
         self.login()

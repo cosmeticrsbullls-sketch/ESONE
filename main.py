@@ -267,6 +267,9 @@ def command_center(request: Request):
              ("calls", "Calls & Collections", "Record calls, promises and follow-up outcomes.", "/calls/new"),
              ("demos", "Demo Bookings", "Schedule treatments and track conversion outcomes.", "/demos"),
              ("reports", "Reports & Follow-ups", "Courtesy queues, PTPs and filtered Excel exports.", "/operations")]
+    cards += [("clients", "Employee Master", "Basic employee details and profiles.", "/employees"),("reports", "Employee Activity Reports", "Daily/monthly activities and PDF WhatsApp sharing.", "/activity-reports"),("reports", "Notifications / Messages", "Today’s activity, new demos/orders and pending reminders.", "/notifications"),("reports", "Orders", "Order bookings and WhatsApp confirmation.", "/orders"),("visits", "Attendance", "GPS punch in/out and map evidence.", "/attendance")]
+    from modules.notifications import inbox_card
+    summary += inbox_card(request)
     if role in {"SUPER_ADMIN", "MANAGEMENT"}: cards.append(("clients", "Staff Password Reset", "Reset an approved employee password with an audit record.", "/command-center/passwords"))
     if role == "SUPER_ADMIN": cards.append(("clients", "Team & Access", "Manage employee accounts and roles.", "/users"))
     modules = ''.join(f'<a class="module-card" href="{url}"><div class="module-icon">{icon(key)}</div><h3>{title}</h3><p>{description}</p><span class="open">Open workspace →</span></a>' for key,title,description,url in cards)
@@ -1107,7 +1110,7 @@ def verify_visit_end_otp(activity_id:int,request:Request,otp:str=Form(...),csrf:
             return HTMLResponse("Invalid OTP. Check the customer code.",400)
         rec.status="VERIFIED";rec.verified_at=datetime.now();v.check_out_at=datetime.now();a.status="COMPLETED";a.completed_at=datetime.now()
         db.add(AuditLog(user_id=request.session['user_id'],entity_type="VISIT",entity_id=v.id,action="COMPLETE_OTP_VERIFIED",new_value="customer OTP verified"))
-        return RedirectResponse(f"/visits/{activity_id}",303)
+        return RedirectResponse("/workspace",303)
 
 
 @app.get("/**", include_in_schema=False)
@@ -1221,3 +1224,12 @@ app.include_router(balance_import_router)
 
 from modules.management_passwords import router as management_password_router
 app.include_router(management_password_router)
+
+from modules.team import router as team_router
+app.include_router(team_router)
+from modules.orders import router as orders_router
+app.include_router(orders_router)
+from modules.activity_reports import router as activity_report_router
+app.include_router(activity_report_router)
+from modules.notifications import router as notifications_router
+app.include_router(notifications_router)

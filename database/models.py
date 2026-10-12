@@ -85,3 +85,36 @@ class DocumentImport(Base):
     activity_id=Column(Integer,ForeignKey('activities.id'))
     created_at=Column(DateTime,nullable=False)
     confirmed_at=Column(DateTime)
+
+class EmployeeProfile(Base):
+    __tablename__='employee_profiles'
+    user_id=Column(Integer,ForeignKey('users.id'),primary_key=True)
+    employee_code=Column(String(40),unique=True)
+    phone=Column(String(20)); designation=Column(String(100)); department=Column(String(100))
+    base_city=Column(String(100)); joining_date=Column(String(10)); emergency_contact=Column(String(100))
+    updated_at=Column(DateTime)
+
+class Attendance(Base):
+    __tablename__='attendance'
+    id=Column(Integer,primary_key=True)
+    user_id=Column(Integer,ForeignKey('users.id'),nullable=False,index=True)
+    punch_in_at=Column(DateTime,nullable=False,index=True); punch_out_at=Column(DateTime)
+    in_latitude=Column(Float,nullable=False); in_longitude=Column(Float,nullable=False); in_accuracy=Column(Float,nullable=False)
+    out_latitude=Column(Float); out_longitude=Column(Float); out_accuracy=Column(Float)
+
+class OrderLine(Base):
+    __tablename__='order_lines'
+    id=Column(Integer,primary_key=True); order_id=Column(Integer,ForeignKey('sales_orders.id'),nullable=False,index=True)
+    sku=Column(String(40),nullable=False); name=Column(String(200),nullable=False)
+    quantity=Column(Integer,nullable=False); mrp=Column(Numeric(12,2),nullable=False)
+    discount_percent=Column(Numeric(5,2),nullable=False); amount=Column(Numeric(12,2),nullable=False)
+
+class DemoEducator(Base):
+    __tablename__='demo_educators'
+    demo_id=Column(Integer,ForeignKey('demo_bookings.id'),primary_key=True)
+    name=Column(String(150),nullable=False); updated_by=Column(Integer,ForeignKey('users.id')); updated_at=Column(DateTime)
+
+class NotificationRead(Base):
+    __tablename__='notification_reads'
+    user_id=Column(Integer,ForeignKey('users.id'),primary_key=True)
+    read_at=Column(DateTime,nullable=False)
