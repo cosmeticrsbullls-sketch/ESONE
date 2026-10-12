@@ -1213,3 +1213,6 @@ from modules.account_recovery import router as recovery_router
 app.include_router(recovery_router)
 from modules.document_import import router as import_router
 app.include_router(import_router)
+
+from modules.balance_import import router as balance_import_router
+app.include_router(balance_import_router)

@@ -77,3 +77,17 @@ class EnhancementTests(unittest.TestCase):
         data['csrf']=self.csrf_form('/reset-password?token='+raw)
         self.assertEqual(self.client.post('/reset-password',data=data).status_code,400)
         with SessionLocal() as db:self.assertIsNotNone(db.query(PasswordReset).one().used_at)
+    def test_reviewed_invoice_items_and_received_amount_are_preserved(self):
+        import json
+        self.login();location=self.upload();csrf=self.csrf_form(location)
+        data=dict(csrf=csrf,client_id=1,reference='INV-PARTIAL',document_date='2026-10-01',due_date='2026-11-01',amount='1250.00',received='50.00',payment_mode='Cash',confirmed='yes',adjust_balance='yes',item_name=['Test shampoo'],item_mrp=['1500.00'],item_quantity=['1'],item_unit=['Pcs'],item_rate=['1250.00'],item_amount=['1250.00'])
+        self.assertEqual(self.client.post(location,data={**data,'received':'1300.00'}).status_code,400)
+        self.assertEqual(self.client.post(location,data=data,follow_redirects=False).status_code,303)
+        from database.models import CollectionActivity
+        with SessionLocal() as db:
+            self.assertEqual(db.get(Client,1).outstanding_amount,1200)
+            receipt=db.query(CollectionActivity).filter_by(payment_reference='IMPORT-1-RECEIVED').one()
+            self.assertEqual(receipt.amount_received,50)
+            metadata=json.loads(db.query(DocumentImport).one().reviewed_data)
+            self.assertEqual(metadata['items'][0]['name'],'Test shampoo')
+            self.assertEqual(metadata['due_date'],'2026-11-01')

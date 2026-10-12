@@ -13,7 +13,7 @@ This branch adds Sales / Collection / Demo home sections, Maps links for registe
 
 ## Import behavior and limits
 
-Management can capture a mobile photo or upload JPEG, PNG, WebP or PDF (10 MB maximum; PDF at most 20 pages; images at most 20 megapixels). Original bytes, full extracted text and reviewed details remain in the database. OCR uses no external document service. Reference and total suggestions are heuristic; documents must be checked before confirmation. Item/tax details are retained as reviewed text, not normalized line-item rows. Layout-specific structured extraction needs real anonymized bill and collection samples before it can be validated.
+Management can capture a mobile photo or upload JPEG, PNG, WebP or PDF (10 MB maximum; PDF at most 20 pages; images at most 20 megapixels). Original bytes, full extracted text and reviewed details remain in the database. OCR uses no external document service. Reference and total suggestions are heuristic; documents must be checked before confirmation. The supplied text-invoice format now extracts item name, MRP, quantity, unit, rate and amount into editable review fields. Reviewed items are stored as structured JSON with dates, payment mode and extracted customer/balance details. Separate tax lines are retained when detected; absent GST values are not assumed. Other layouts and photographed documents still require review. Item quantities and row sums are checked against subtotal; original cumulative balances remain separate from the invoice total.
 
 Confirmation atomically creates the linked activity and order or collection. Collection imports require a matching existing bill ID for the selected client; import the old bill first if needed. Original-file digest, invoice reference and client/receipt reference guard duplicates. A confirmed import cannot be posted twice. Historical imports leave the current outstanding balance unchanged by default; management explicitly opts in if these entries are not already in the opening balance.
 
@@ -22,3 +22,11 @@ Administrative visit closure cancels pending end OTPs and records the operator, 
 ## Validation
 
 Run `TZ=UTC python -m unittest discover -s tests -q`. Tests use an isolated synthetic SQLite database and mocked SMTP/OCR; no production data or messages are used. New cases cover management closure evidence preservation, role and CSRF rejection, inactive session revocation, password changes, single-use email reset, import review/no early ledger writes, duplicate prevention, atomic confirmation and original retention. Live deployment and real document accuracy remain to be verified.
+
+## Outstanding Excel import
+
+The supplied outstanding format is supported directly as `.xlsx` (25 MB maximum). The parser reads party name, area, contact, bill amount/reference/date, outstanding and remarks. It excludes blank-party subtotal rows and preserves source sheet/row. Read-only streaming is capped at 5,000 rows per sheet because formatting may extend to a million rows; the review shows this cap and requires verification that later business records do not exist. Decompressed ZIP content is capped at 200 MB.
+
+Management selects rows, checks invoice references and registered-client matches, and can explicitly create unmatched clients. All selected rows are validated before any ledger writes. Confirmation stores original bill amounts and reviewed outstanding snapshots. Amount-minus-balance is an unallocated reduction, not a fabricated collection receipt: payment date, mode, receipt and allocation cannot be inferred from this sheet. Existing invoices are rejected rather than overwritten. Adding outstanding to current balances is optional; the default preserves already-entered opening balances. Each uploaded sheet is confirmed once; unselected rows are recorded as skipped.
+
+A payment explicitly shown on an imported invoice is handled separately from an outstanding sheet. Its reviewed received amount can create a linked collection record; current balance changes use invoice total minus received, only when opted in.
