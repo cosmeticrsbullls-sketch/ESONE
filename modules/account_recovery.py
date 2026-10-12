@@ -1,10 +1,11 @@
-"""Single-use email reset links. SMTP settings stay in the server environment."""
+"""Single-use email reset links with configurable HTTPS/SMTP delivery."""
 import hashlib
 import os
 import smtplib
-import ssl
 from datetime import timedelta
 from email.message import EmailMessage
+from urllib.parse import urlsplit
+from modules.email_delivery import send as deliver_email, DeliveryError
 from secrets import compare_digest, token_urlsafe
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -18,9 +19,18 @@ def digest(value):return hashlib.sha256(value.encode()).hexdigest()
 def csrf_ok(request,csrf):return bool(csrf) and compare_digest(csrf,request.session.get('workflow_csrf',''))
 
 def mail_settings():
-    keys=['SMTP_HOST','SMTP_USERNAME','SMTP_PASSWORD','SMTP_FROM','ESONE_PUBLIC_URL']
+    provider=os.getenv('EMAIL_PROVIDER','smtp').strip().lower()
+    if provider not in {'smtp','resend'}:return None
+    keys=(['RESEND_API_KEY','EMAIL_FROM'] if provider=='resend' else ['SMTP_HOST','SMTP_USERNAME','SMTP_PASSWORD','SMTP_FROM'])+['ESONE_PUBLIC_URL']
     config={key:os.getenv(key,'').strip() for key in keys}
-    if not all(config.values()) or not config['ESONE_PUBLIC_URL'].startswith('https://'):return None
+    if not all(config.values()):return None
+    try:
+        url=urlsplit(config['ESONE_PUBLIC_URL'])
+        if url.scheme!='https' or not url.hostname or url.username or url.password or url.query or url.fragment:return None
+    except ValueError:return None
+    sender=config.get('EMAIL_FROM',config.get('SMTP_FROM',''))
+    if '\n' in sender or '\r' in sender:return None
+    config['EMAIL_PROVIDER']=provider
     return config
 
 @router.get('/forgot-password',response_class=HTMLResponse)
@@ -40,14 +50,14 @@ def send_reset(request:Request,email:str=Form(...),csrf:str=Form(...)):
                 raw=token_urlsafe(32)
                 reset=PasswordReset(user_id=user.id,token_hash=digest(raw),password_fingerprint=digest(user.password_hash),created_at=now(),expires_at=now()+timedelta(minutes=30))
                 db.add(reset)
-                message=EmailMessage();message['From']=config['SMTP_FROM'];message['To']=user.email;message['Subject']='ESONE password reset'
+                message=EmailMessage();message['From']=config.get('EMAIL_FROM',config.get('SMTP_FROM'));message['To']=user.email;message['Subject']='ESONE password reset'
                 message.set_content('Use this link within 30 minutes to reset your ESONE password:\n'+config['ESONE_PUBLIC_URL'].rstrip('/')+'/reset-password?token='+raw+'\nIf you did not request this, ignore this message.')
                 try:
-                    with smtplib.SMTP(config['SMTP_HOST'],int(os.getenv('SMTP_PORT','587')),timeout=15) as smtp:
-                        smtp.starttls(context=ssl.create_default_context());smtp.login(config['SMTP_USERNAME'],config['SMTP_PASSWORD']);smtp.send_message(message)
-                except (OSError,smtplib.SMTPException,ValueError):
-                    # Uniform response protects account existence; retry can issue a new link.
-                    db.expunge(reset)
+                    deliver_email(config,message)
+                except DeliveryError:
+                    # Keep failed attempts throttled and their links invalid.
+                    reset.used_at=now();reset.expires_at=now()
+                    db.add(AuditLog(user_id=user.id,entity_type='USER',entity_id=user.id,action='RESET_EMAIL_FAILED'))
     return HTMLResponse(page('Check your email','<p>If this is an approved registered account, a reset link will be sent. Check spam too.</p>'))
 
 @router.get('/reset-password',response_class=HTMLResponse)
