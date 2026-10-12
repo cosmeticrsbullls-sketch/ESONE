@@ -57,3 +57,31 @@ class VerificationOTP(Base):
     expires_at=Column(DateTime,nullable=False)
     verified_at=Column(DateTime)
     created_at=Column(DateTime,server_default=func.now())
+
+# Explicit upgrade_features.py migration; never created during application startup.
+from sqlalchemy import LargeBinary
+class PasswordReset(Base):
+    __tablename__='password_resets'
+    id=Column(Integer,primary_key=True)
+    user_id=Column(Integer,ForeignKey('users.id'),nullable=False,index=True)
+    token_hash=Column(String(64),unique=True,nullable=False)
+    password_fingerprint=Column(String(64),nullable=False)
+    expires_at=Column(DateTime,nullable=False)
+    used_at=Column(DateTime)
+    created_at=Column(DateTime,nullable=False)
+
+class DocumentImport(Base):
+    __tablename__='document_imports'
+    id=Column(Integer,primary_key=True)
+    created_by=Column(Integer,ForeignKey('users.id'),nullable=False)
+    kind=Column(String(20),nullable=False)
+    digest=Column(String(64),unique=True,nullable=False)
+    filename=Column(String(200),nullable=False)
+    media_type=Column(String(100),nullable=False)
+    original=Column(LargeBinary,nullable=False)
+    extracted_text=Column(Text,nullable=False)
+    reviewed_data=Column(Text)
+    status=Column(String(20),nullable=False,default='REVIEW')
+    activity_id=Column(Integer,ForeignKey('activities.id'))
+    created_at=Column(DateTime,nullable=False)
+    confirmed_at=Column(DateTime)

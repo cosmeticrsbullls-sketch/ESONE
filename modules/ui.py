@@ -37,13 +37,13 @@ def icon(key):
 
 def navigation(path, name, role):
     management=role in {'SUPER_ADMIN','MANAGEMENT','OFFICE'}
-    links=[('/command-center' if management else '/mobile','Overview','dashboard'),('/visits','Field Visits','visits')]
-    if management:links += [('/clients','Clients / CRM','clients'),('/clients#new-salon','+ New Salon','clients'),('/calls/new','Calls & Collections','calls'),('/demos','Demo Bookings','demos'),('/operations','Reports & Follow-ups','reports')]
-    if role=='SUPER_ADMIN':links += [('/users','Team & Access','clients')]
+    links=[('/workspace','Home','dashboard'),('/workspace/sales','Sales','visits'),('/workspace/collection','Collection','calls'),('/workspace/demo','Demo','demos')]
+    if management:links += [('/command-center','Command Center','reports')]
+    links += [('/account/password','Change Password','clients')]
     items=''.join(f'<a href="{url}" class="{"active" if path==url or (url not in {"/command-center","/mobile","/calls/new"} and path.startswith(url+"/")) or (url=="/operations" and path.startswith("/ptps/")) else ""}">{icon(key)}{label}</a>' for url,label,key in links)
     current=next((label for url,label,key in links if path==url or path.startswith(url+'/')),'Workspace')
     initial=escape((name or 'E')[0].upper())
-    return f'''<aside class="esone-sidebar" aria-label="Main navigation"><a class="esone-brand" href="{'/command-center' if management else '/mobile'}">ES<span>ONE</span></a><div class="esone-caption">Business workspace</div>{brand_mark()}<div class="nav-label">WORKSPACE</div><nav class="esone-links">{items}</nav><div class="sidebar-foot">Earthshine business operations<br>One connected workspace.</div></aside><div class="esone-topbar"><div class="breadcrumb">Workspace / <strong>{current}</strong></div><div class="account"><span class="avatar">{initial}</span><div class="account-name">{escape(name)}<small>{escape(role.replace('_',' ').title())}</small></div><a class="logout" href="/logout">Sign out</a></div></div>'''
+    return f'''<aside class="esone-sidebar" aria-label="Main navigation"><a class="esone-brand" href="/workspace">ES<span>ONE</span></a><div class="esone-caption">Business workspace</div>{brand_mark()}<div class="nav-label">WORKSPACE</div><nav class="esone-links">{items}</nav><div class="sidebar-foot">Earthshine business operations<br>One connected workspace.</div></aside><div class="esone-topbar"><div class="breadcrumb">Workspace / <strong>{current}</strong></div><div class="account"><span class="avatar">{initial}</span><div class="account-name">{escape(name)}<small>{escape(role.replace('_',' ').title())}</small></div><a class="logout" href="/logout">Sign out</a></div></div>'''
 
 def enhance(document, path, name='', role='', signed_in=False):
     if '</head>' not in document or '<body' not in document:return document
@@ -54,5 +54,12 @@ def enhance(document, path, name='', role='', signed_in=False):
     document=document[:end]+f' class="{cls}"'+document[end:]
     if signed_in:document=document[:document.index('>',start)+1]+navigation(path,name,role)+document[document.index('>',start)+1:]
     if is_login:document=document.replace('<div class="login-box">','<div class="login-box">'+brand_mark(),1)
-    if is_login:document=document.replace('</form>','</form><div class="login-foot">Earthshine Professional · Business workspace</div>',1)
+    if is_login:document=document.replace('</form>','</form><p><a href="/forgot-password">Forgot password?</a></p><div class="login-foot">Earthshine Professional · Business workspace</div>',1)
+    if signed_in:
+        document=document.replace('</body>', '<script>document.querySelectorAll("table").forEach(t=>{const labels=Array.from(t.querySelectorAll("thead th, tr:first-child th")).map(x=>x.textContent.trim());t.querySelectorAll("tr").forEach(r=>r.querySelectorAll("td").forEach((d,i)=>d.dataset.label=labels[i]||""));});</script></body>')
     return document
+
+CSS += """
+.workspace-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.workspace-buttons a{display:flex;align-items:center;justify-content:center;min-height:180px;font-size:32px;font-weight:700;border:1px solid #d7b666;border-radius:18px;background:#fff8e8}.esone-app img{max-width:100%;height:auto}.esone-app main{min-width:0}.esone-app textarea{width:100%;min-height:100px}.esone-app td{overflow-wrap:anywhere}
+@media(max-width:600px){.workspace-buttons{grid-template-columns:1fr}.workspace-buttons a{min-height:120px;font-size:30px}.esone-app .table table,.esone-app table{min-width:0!important}.esone-app table,.esone-app tbody,.esone-app tr,.esone-app td{display:block;width:100%}.esone-app thead,.esone-app tr:has(th){display:none}.esone-app tr{border:1px solid #ddd;border-radius:12px;margin:12px 0;padding:12px}.esone-app td{border:0;padding:7px 0}.esone-app td:before{content:attr(data-label);font-weight:600;display:block;font-size:12px;color:#697582}.esone-app input,.esone-app select{max-width:100%!important}.calendar-grid{overflow:hidden}}
+"""

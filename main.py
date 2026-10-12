@@ -2,7 +2,7 @@ import os
 from html import escape
 from secrets import token_urlsafe
 from sqlalchemy.exc import SQLAlchemyError
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -12,7 +12,21 @@ from modules.security import verify_password
 from modules.users import create_user, get_all_users
 
 
-app = FastAPI(title="ESONE")
+def approved_session(request: Request):
+    if not request.session.get('user_id'):
+        return
+    import hashlib
+    with SessionLocal() as db:
+        user=db.get(User,request.session['user_id'])
+        fingerprint=hashlib.sha256(user.password_hash.encode()).hexdigest() if user else ''
+        if not user or not user.is_active or request.session.get('credential_fingerprint','')!=fingerprint:
+            request.session.clear()
+            raise HTTPException(status_code=303,headers={'Location':'/login'})
+        request.session['role']=user.role
+        request.session['full_name']=user.full_name
+        request.session['credential_fingerprint']=fingerprint
+
+app = FastAPI(dependencies=[Depends(approved_session)], title="ESONE")
 
 from modules.privacy import router as privacy_router
 app.include_router(privacy_router)
@@ -166,10 +180,7 @@ def login_page(error=""):
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if request.session.get("user_id"):
-        if request.session.get("role") == "SALES":
-            return RedirectResponse("/mobile", status_code=303)
-
-        return RedirectResponse("/command-center", status_code=303)
+        return RedirectResponse("/workspace", status_code=303)
 
     return login_page()
 
@@ -213,17 +224,10 @@ def login(
         request.session["user_id"] = user.id
         request.session["full_name"] = user.full_name
         request.session["role"] = user.role
+        import hashlib
+        request.session["credential_fingerprint"] = hashlib.sha256(user.password_hash.encode()).hexdigest()
 
-        if user.role == "SALES":
-            return RedirectResponse(
-                "/mobile",
-                status_code=303
-            )
-
-        return RedirectResponse(
-            "/command-center",
-            status_code=303
-        )
+        return RedirectResponse("/workspace", status_code=303)
 
     finally:
         db.close()
@@ -1001,8 +1005,12 @@ def visit_detail(activity_id:int, request:Request):
         otp_block=''
         if otp:
             otp_block=f'''<form method="post" action="/visits/{activity_id}/verify-end-otp">{csrf_field}<h3>Customer End OTP</h3><input name="otp" inputmode="numeric" maxlength="6" required><button>VERIFY & COMPLETE</button></form>'''
+        from modules.enhancements import map_link
+        maps = '<p>' + ' · '.join(map_link(label,lat,lon) for label,lat,lon in [('Salon on Google Maps',c.latitude,c.longitude),('Check-in on Google Maps',v.check_in_latitude,v.check_in_longitude),('Check-out on Google Maps',v.check_out_latitude,v.check_out_longitude)] if lat is not None and lon is not None) + '</p>'
+        if request.session.get('role') in {'SUPER_ADMIN','MANAGEMENT','OFFICE'} and a.status == 'IN_PROGRESS':
+            end_block += f'<form method="post" action="/visits/{activity_id}/management-close">{csrf_field}<h3>Command Center closure</h3><label>Reason for closing without customer OTP</label><textarea name="reason" minlength="10" maxlength="2000" required></textarea><button>Close visit with audit record</button></form>'
         register_note="Salon GPS not registered. Current verified location will be registered when visit starts." if not gps_registered else f"Registered GPS: {c.latitude:.5f}, {c.longitude:.5f} (allowed radius {VISIT_RADIUS_METERS}m)"
-        return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Visit</title><style>body{{font-family:Arial;background:#f4f4f4;margin:0}}main{{max-width:650px;margin:auto;padding:22px}}.card{{background:#fff;padding:22px;border:1px solid #ddd;border-radius:14px}}button,input{{padding:13px;border-radius:8px;border:1px solid #bbb;margin:6px 0}}button{{background:#222;color:white;font-weight:bold}}.ok{{color:green}}</style></head><body><main><a href="/visits">← Visits</a><div class="card"><h2>{escape(str(v.visit_type))} VISIT</h2><h3>{escape(str(c.business_name))}</h3><p>Status: <b>{escape(str(a.status))}</b></p><p>Location: {register_note}</p>{start_block}{end_block}{otp_block}</div></main>
+        return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Visit</title><style>body{{font-family:Arial;background:#f4f4f4;margin:0}}main{{max-width:650px;margin:auto;padding:22px}}.card{{background:#fff;padding:22px;border:1px solid #ddd;border-radius:14px}}button,input{{padding:13px;border-radius:8px;border:1px solid #bbb;margin:6px 0}}button{{background:#222;color:white;font-weight:bold}}.ok{{color:green}}</style></head><body><main><a href="/visits">← Visits</a><div class="card"><h2>{escape(str(v.visit_type))} VISIT</h2><h3>{escape(str(c.business_name))}</h3><p>Status: <b>{escape(str(a.status))}</b></p><p>Location: {register_note}</p>{maps}{start_block}{end_block}{otp_block}</div></main>
 <script>function startVisit(){{if(!navigator.geolocation){{alert('GPS not supported');return}};document.getElementById('geo').innerText='Getting location...';navigator.geolocation.getCurrentPosition(async p=>{{let f=new FormData();f.append('latitude',p.coords.latitude);f.append('longitude',p.coords.longitude);let r=await fetch('/visits/{activity_id}/start',{{method:'POST',body:f}});let t=await r.text();if(r.ok)location.reload();else document.getElementById('geo').innerHTML=t;}},e=>{{document.getElementById('geo').innerText='Location permission/GPS required: '+e.message}},{{enableHighAccuracy:true,timeout:15000}})}};</script></body></html>'''
     finally: db.close()
 
@@ -1198,3 +1206,10 @@ def mobile_icon(icon_name: str):
 
 from modules.field_intake import router as field_intake_router
 app.include_router(field_intake_router)
+
+from modules.enhancements import router as enhancements_router
+app.include_router(enhancements_router)
+from modules.account_recovery import router as recovery_router
+app.include_router(recovery_router)
+from modules.document_import import router as import_router
+app.include_router(import_router)
