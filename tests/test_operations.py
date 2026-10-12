@@ -153,7 +153,8 @@ class OperationsTests(unittest.TestCase):
         with patch.dict(os.environ,{'ESONE_ENV':'test'}):
             response=self.client.post('/visits/6/request-end-otp',data={'notes':'Visit done','csrf':self.csrf})
         code=re.search(r'TEST OTP: (\d+)',response.text).group(1)
-        self.assertEqual(self.client.post('/visits/6/verify-end-otp',data={'otp':code,'csrf':self.csrf},follow_redirects=False).status_code,303)
+        completed=self.client.post('/visits/6/verify-end-otp',data={'otp':code,'csrf':self.csrf},follow_redirects=False)
+        self.assertEqual(completed.status_code,303);self.assertEqual(completed.headers['location'],'/workspace')
         self.assertEqual(self.client.post('/visits/6/verify-end-otp',data={'otp':code,'csrf':self.csrf},follow_redirects=False).status_code,409)
         with SessionLocal() as db:
             self.assertEqual(db.get(Activity,6).status,'COMPLETED')

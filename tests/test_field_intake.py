@@ -18,7 +18,8 @@ class FieldIntakeTests(unittest.TestCase):
         self.login('a')
         for section in ['sales', 'collection']:
             workspace = self.client.get('/workspace/' + section)
-            self.assertIn('href="/field/intake"', workspace.text)
+            self.assertIn('href="/field/intake?visit_type='+section.upper()+'"', workspace.text)
+            self.assertIn('value="'+section.upper()+'" selected>',self.client.get('/field/intake?visit_type='+section.upper()).text)
         response = self.client.get('/field/intake')
         self.assertEqual(response.status_code, 200)
         self.assertIn('action="/field/start"', response.text)

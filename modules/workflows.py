@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from database.db import SessionLocal
-from database.models import Activity, AuditLog, Client, CollectionActivity, DemoBooking, PromiseToPay, User
+from database.models import Activity, AuditLog, Client, CollectionActivity, DemoBooking, PromiseToPay, User, DemoEducator
 from modules.operations import access, business_today
 
 router = APIRouter()
@@ -66,7 +66,7 @@ def clients_select(db, selected=0):
 
 
 def salon_field(options, destination):
-    return f'''<div class="salon-picker"><label>Salon <input type="search" class="salon-search" placeholder="Search salon / phone" aria-label="Search salon options" autocomplete="off"><select name="client_id" required aria-label="Salon">{options}</select></label><a class="secondary" href="/clients?return_to={destination}#new-salon">+ New Salon</a><small class="salon-help" aria-live="polite">Select a registered salon, or add a new one.</small></div>'''
+    return f'''<div class="salon-picker"><label>Salon <input type="search" class="salon-search" placeholder="Search salon / phone" aria-label="Search salon options" autocomplete="off"><select name="client_id" required aria-label="Salon">{options}</select></label><a class="secondary" href="/salons/new?return_to={destination}">+ New Salon</a><small class="salon-help" aria-live="polite">Select a registered salon, or add a new one.</small></div>'''
 
 
 def amount(value):
@@ -153,9 +153,19 @@ def ptp_followup(ptp_id:int,request:Request,outcome:str=Form(...),notes:str=Form
         cid=p.client_id
     return RedirectResponse(f'/clients/{cid}/timeline',303)
 
+
+def demo_access(request, csrf=None):
+    from modules.team import staff_access, MANAGEMENT
+    denied=staff_access(request,csrf)
+    if denied is not None:return denied
+    if request.session.get('role') not in MANAGEMENT|{'SALES'}:return HTMLResponse('Access Denied',403)
+
+def demo_owner(request, activity):
+    return request.session.get('role') in {'SUPER_ADMIN','MANAGEMENT','OFFICE'} or request.session['user_id'] in {activity.created_by,activity.assigned_user_id}
+
 @router.get('/demos',response_class=HTMLResponse)
 def demos(request:Request,status:str='',q:str='',month:str='',educator_id:int=0,day:date|None=None):
-    denied=access(request)
+    denied=demo_access(request)
     if denied is not None:return denied
     from modules.demo_calendar import calendar_view
     with SessionLocal() as db:
@@ -165,16 +175,19 @@ def demos(request:Request,status:str='',q:str='',month:str='',educator_id:int=0,
 
 @router.get('/demos/new',response_class=HTMLResponse)
 def demo_form(request:Request, client_id:int=0, demo_day:date|None=None, educator_id:int=0):
-    denied=access(request)
+    denied=demo_access(request)
     if denied is not None:return denied
     with SessionLocal() as db:
+        from modules.demo_calendar import calendar_view
+        calendar=calendar_view(db,day=demo_day)
         clients=clients_select(db,client_id)
-        people='<option value="" disabled '+('selected' if not educator_id else '')+'>Select educator</option>'+''.join(f'<option value="{u.id}" {"selected" if u.id==educator_id else ""}>{escape(u.full_name)}</option>' for u in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
-    return page('Book Demo',f'''<p><a class="secondary" href="/demos">View demo calendar</a></p><form method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients, "/demos/new")}<label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" value="{str(demo_day)+'T10:00' if demo_day and demo_day>=business_today() else ''}" required></label><label>Educator <select name="educator_id" required>{people}</select></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>Book Demo</button></form>''')
+        people='<option value="0" '+('selected' if not educator_id else '')+'>Optional registered educator</option>'+''.join(f'<option value="{u.id}" {"selected" if u.id==educator_id else ""}>{escape(u.full_name)}</option>' for u in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
+    date_script='''<script>const input=document.querySelector('input[name=demo_at]');const output=document.querySelector('#date-bookings');let requestNo=0;async function refreshBookings(){const seq=++requestNo;const day=input.value.slice(0,10);if(!day)return;output.textContent='Checking booked demos…';try{const r=await fetch('/demo-availability?day='+encodeURIComponent(day));if(!r.ok)throw Error();const result=await r.json();if(seq!==requestNo)return;output.replaceChildren();const title=document.createElement('strong');title.textContent=result.bookings.length+' demos booked on '+day;output.append(title);result.bookings.forEach(item=>{const row=document.createElement('div');row.textContent=item.time+' · '+item.salon+' · '+item.educator+' · '+item.status;output.append(row);});}catch(e){if(seq===requestNo)output.textContent='Could not check bookings. Open demo calendar before confirming.';}}input.addEventListener('change',refreshBookings);input.addEventListener('input',refreshBookings);document.querySelectorAll('[data-date]').forEach(d=>d.addEventListener('click',()=>setTimeout(refreshBookings,0)));if(input.value)refreshBookings();</script>'''
+    return page('Book Demo',f'''<details open><summary>Already booked demos - choose a day</summary>{calendar}</details><p><a class="secondary" href="/demos">View demo calendar</a></p><form id="demo-booking" method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients, "/demos/new")}<label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" value="{str(demo_day)+'T10:00' if demo_day and demo_day>=business_today() else ''}" required></label><label>Registered educator <select name="educator_id">{people}</select></label><label>Educator name<input name="educator_name" maxlength="150" placeholder="Enter any educator name"></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>Book Demo</button></form><p id="date-bookings" aria-live="polite"></p><script>document.querySelectorAll("[data-date]").forEach(day=>day.addEventListener("click",e=>{{e.preventDefault();document.querySelector("input[name=demo_at]").value=day.dataset.date+"T10:00";document.querySelector("#date-bookings").textContent=day.dataset.demoCount+" demos already booked on "+day.dataset.date+". Check times in calendar before booking.";document.querySelector("#demo-booking").scrollIntoView({{behavior:"smooth"}});}}));</script>'''+date_script)
 
 @router.post('/demos')
-def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(...),treatment:str=Form(...),demo_at:str=Form(...),notes:str=Form(''),csrf:str=Form(''),submission:str=Form(''),custom_treatment:str=Form('')):
-    denied=guard(request,csrf)
+def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(0),treatment:str=Form(...),demo_at:str=Form(...),notes:str=Form(''),csrf:str=Form(''),submission:str=Form(''),custom_treatment:str=Form(''),educator_name:str=Form('')):
+    denied=demo_access(request,csrf)
     if denied is not None:return denied
     try:
         scheduled=datetime.fromisoformat(demo_at)
@@ -186,22 +199,27 @@ def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(...),
         db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
         if db.query(AuditLog).filter_by(user_id=request.session['user_id'],action='DEMO_BOOKED',new_value=submission).first():return HTMLResponse('This demo was already booked.',409)
         if not db.get(Client,client_id):return HTMLResponse('Client not found',404)
-        educator=db.get(User,educator_id)
-        if not educator or not educator.is_active:return HTMLResponse('Select an active educator.',400)
-        a=Activity(client_id=client_id,activity_type='DEMO',source='MANAGEMENT',status='BOOKED',title=treatment.strip(),notes=notes.strip(),scheduled_at=scheduled,assigned_user_id=educator_id,created_by=request.session['user_id'],created_at=now())
-        db.add(a);db.flush();d=DemoBooking(activity_id=a.id,product_or_treatment=treatment.strip(),booking_source='MANAGEMENT',demo_date=scheduled,assigned_educator_id=educator_id)
-        db.add(d);db.flush();identity=d.id;audit(db,request,'DemoBooking',d.id,'DEMO_BOOKED',new=submission)
+        educator=db.get(User,educator_id) if educator_id else None
+        educator_name=educator_name.strip() or (educator.full_name if educator else '')
+        if not educator_name or len(educator_name)>150 or (educator_id and (not educator or not educator.is_active)):return HTMLResponse('Enter an educator name or select an active educator.',400)
+        a=Activity(client_id=client_id,activity_type='DEMO',source=request.session['role'],status='BOOKED',title=treatment.strip(),notes=notes.strip(),scheduled_at=scheduled,assigned_user_id=educator_id or None,created_by=request.session['user_id'],created_at=now())
+        db.add(a);db.flush();d=DemoBooking(activity_id=a.id,product_or_treatment=treatment.strip(),booking_source=request.session['role'],demo_date=scheduled,assigned_educator_id=educator_id or None)
+        db.add(d);db.flush();db.add(DemoEducator(demo_id=d.id,name=educator_name,updated_by=request.session['user_id'],updated_at=now()));identity=d.id;audit(db,request,'DemoBooking',d.id,'DEMO_BOOKED',new=submission)
     return RedirectResponse(f'/demos/{identity}',303)
 
 @router.get('/demos/{demo_id}',response_class=HTMLResponse)
 def demo_detail(demo_id:int,request:Request):
-    denied=access(request)
+    denied=demo_access(request)
     if denied is not None:return denied
     with SessionLocal() as db:
         d=db.get(DemoBooking,demo_id)
         if not d:return HTMLResponse('Demo not found',404)
-        a=db.get(Activity,d.activity_id);c=db.get(Client,a.client_id);u=db.get(User,d.assigned_educator_id)
-        content=f'<p>{escape(c.business_name)} · {escape(d.product_or_treatment or "")} · {d.demo_date} (India)</p><p>Educator: {escape(u.full_name if u else "Unassigned")} · {escape(a.status)} · {escape(d.conversion_status or "")}</p><p>{escape(a.notes or "")}</p><p>Follow-up: {d.followup_at.date() if d.followup_at else "—"}</p><p>Started: {d.started_at or "—"} · Completed: {d.completed_at or "—"} (UTC)</p>'
+        a=db.get(Activity,d.activity_id)
+        if not demo_owner(request,a):return HTMLResponse('Access Denied',403)
+        c=db.get(Client,a.client_id);u=db.get(User,d.assigned_educator_id) if d.assigned_educator_id else None
+        named=db.get(DemoEducator,d.id);educator_label=named.name if named else (u.full_name if u else 'Unassigned')
+        content=f'<p>{escape(c.business_name)} · {escape(d.product_or_treatment or "")} · {d.demo_date} (India)</p><p>Educator: {escape(educator_label)} · {escape(a.status)} · {escape(d.conversion_status or "")}</p><p>{escape(a.notes or "")}</p><p>Follow-up: {d.followup_at.date() if d.followup_at else "—"}</p><p>Started: {d.started_at or "—"} · Completed: {d.completed_at or "—"} (UTC)</p>'
+        content+=f'<form method="post" action="/demos/{demo_id}/educator">{hidden(request)}<label>Educator name<input name="educator_name" maxlength="150" value="{escape(educator_label,quote=True)}" required></label><button>Update educator name</button></form>'
         if a.status in {'BOOKED','IN_PROGRESS'}:
             actions=['START','CANCEL'] if a.status=='BOOKED' else ['COMPLETE']
             content+=f'''<form method="post">{hidden(request)}{choices("action", [(v,{"START":"Start Demo","CANCEL":"Cancel Booking","COMPLETE":"Complete Demo"}[v]) for v in actions], actions[0], "Demo action")}{choices("result", [("CONVERTED","Converted"),("NOT_CONVERTED","Not converted"),("FOLLOW_UP","Follow-up needed")], "CONVERTED", "Conversion result (completion only)")}<label>Notes / reason <textarea name="notes" maxlength="4000" required></textarea></label><label data-when="followup">Follow-up date <input name="followup" type="date"></label><button>Save</button></form>'''
@@ -209,7 +227,7 @@ def demo_detail(demo_id:int,request:Request):
 
 @router.post('/demos/{demo_id}')
 def demo_transition(demo_id:int,request:Request,action:str=Form(...),result:str=Form('PENDING'),notes:str=Form(''),followup:str=Form(''),csrf:str=Form('')):
-    denied=guard(request,csrf)
+    denied=demo_access(request,csrf)
     if denied is not None:return denied
     if not notes.strip() or len(notes)>4000:return HTMLResponse('Notes are required (maximum 4000 characters).',400)
     try:
@@ -220,7 +238,9 @@ def demo_transition(demo_id:int,request:Request,action:str=Form(...),result:str=
     with SessionLocal.begin() as db:
         d=db.query(DemoBooking).filter_by(id=demo_id).with_for_update().first()
         if not d:return HTMLResponse('Demo not found',404)
-        a=db.get(Activity,d.activity_id);old=a.status
+        a=db.get(Activity,d.activity_id)
+        if not demo_owner(request,a):return HTMLResponse('Access Denied',403)
+        old=a.status
         if action=='START' and old=='BOOKED':a.status='IN_PROGRESS';d.started_at=now()
         elif action=='CANCEL' and old=='BOOKED':a.status='CANCELLED';a.completed_at=now()
         elif action=='COMPLETE' and old=='IN_PROGRESS':
@@ -230,4 +250,39 @@ def demo_transition(demo_id:int,request:Request,action:str=Form(...),result:str=
         else:return HTMLResponse('This action is not available for the current demo status.',409)
         a.notes=(a.notes+'\n' if a.notes else '')+action+': '+notes.strip()
         audit(db,request,'DemoBooking',d.id,'STATUS_CHANGED',old=old,new=json.dumps({'status':a.status,'result':d.conversion_status}))
+    return RedirectResponse('/workspace' if action=='COMPLETE' else f'/demos/{demo_id}',303)
+
+@router.post('/demos/{demo_id}/educator')
+def edit_educator(demo_id:int,request:Request,educator_name:str=Form(...),csrf:str=Form('')):
+    denied=demo_access(request,csrf)
+    if denied is not None:return denied
+    educator_name=educator_name.strip()
+    if not 1<=len(educator_name)<=150:return HTMLResponse('Enter educator name (1-150 characters)',400)
+    with SessionLocal.begin() as db:
+        d=db.query(DemoBooking).filter_by(id=demo_id).with_for_update().first()
+        if not d:return HTMLResponse('Demo not found',404)
+        a=db.get(Activity,d.activity_id)
+        if not demo_owner(request,a):return HTMLResponse('Access Denied',403)
+        named=db.get(DemoEducator,demo_id)
+        old=named.name if named else None
+        if not named:named=DemoEducator(demo_id=demo_id);db.add(named)
+        named.name=educator_name;named.updated_by=request.session['user_id'];named.updated_at=now()
+        # Changing free-text name clears stale assignment to an unrelated registered educator.
+        d.assigned_educator_id=None;a.assigned_user_id=None
+        audit(db,request,'DemoBooking',demo_id,'EDUCATOR_UPDATED',old=old,new=educator_name)
     return RedirectResponse(f'/demos/{demo_id}',303)
+
+@router.get('/demo-availability')
+def availability(request:Request,day:date):
+    denied=demo_access(request)
+    if denied is not None:return denied
+    from fastapi.responses import JSONResponse
+    with SessionLocal() as db:
+        start=datetime.combine(day,time.min);end=start+timedelta(days=1)
+        records=db.query(DemoBooking,Activity,Client).join(Activity,Activity.id==DemoBooking.activity_id).join(Client,Client.id==Activity.client_id).filter(DemoBooking.demo_date>=start,DemoBooking.demo_date<end,Activity.status!='CANCELLED').order_by(DemoBooking.demo_date).all()
+        names={n.demo_id:n.name for n in db.query(DemoEducator).all()}
+        bookings=[]
+        for d,a,c in records:
+            user=db.get(User,d.assigned_educator_id) if d.assigned_educator_id else None
+            bookings.append({'time':d.demo_date.strftime('%H:%M'),'salon':c.business_name,'educator':names.get(d.id,user.full_name if user else 'Unassigned'),'status':a.status})
+    return JSONResponse({'day':str(day),'bookings':bookings},headers={'Cache-Control':'no-store'})

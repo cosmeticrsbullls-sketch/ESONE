@@ -26,7 +26,8 @@ class EnhancementTests(unittest.TestCase):
         detail=self.client.get('/visits/6').text
         self.assertIn('google.com/maps/search/',detail)
         data=dict(csrf=self.csrf,reason='Customer OTP unavailable')
-        self.assertEqual(self.client.post('/visits/6/management-close',data=data,follow_redirects=False).status_code,303)
+        closed=self.client.post('/visits/6/management-close',data=data,follow_redirects=False)
+        self.assertEqual(closed.status_code,303);self.assertEqual(closed.headers['location'],'/workspace')
         self.assertEqual(self.client.post('/visits/6/management-close',data=data).status_code,409)
         with SessionLocal() as db:
             visit=db.query(Visit).filter_by(activity_id=6).one()
