@@ -11,6 +11,29 @@ class FieldIntakeTests(unittest.TestCase):
     tearDown = OperationsTests.tearDown
     login = OperationsTests.login
 
+    def test_workspace_visit_links_open_intake_and_start_collection(self):
+        response = self.client.get('/field/intake', follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers['location'], '/login')
+        self.login('a')
+        for section in ['sales', 'collection']:
+            workspace = self.client.get('/workspace/' + section)
+            self.assertIn('href="/field/intake"', workspace.text)
+        response = self.client.get('/field/intake')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('action="/field/start"', response.text)
+        self.assertIn('value="COLLECTION"', response.text)
+        data = {'csrf': re.search(r'name="csrf" value="([^"]+)"', response.text)[1],
+                'submission': re.search(r'name="submission" value="([^"]+)"', response.text)[1],
+                'latitude': '23', 'longitude': '72', 'visit_type': 'COLLECTION', 'client_id': '1'}
+        started = self.client.post('/field/start', data=data, follow_redirects=False)
+        self.assertEqual(started.status_code, 303)
+        with SessionLocal() as db:
+            activity = db.query(Activity).order_by(Activity.id.desc()).first()
+            visit = db.query(Visit).filter_by(activity_id=activity.id).one()
+            self.assertEqual(visit.visit_type, 'COLLECTION')
+            self.assertEqual(activity.status, 'IN_PROGRESS')
+
 
 def form(self, who='a'):
     self.login(who)
