@@ -54,6 +54,17 @@ def intake(request):
 </form><script src="/field/intake.js?v=2" defer></script></div>'''
 
 
+@router.get('/field/intake', response_class=HTMLResponse)
+def intake_page(request: Request):
+    if not request.session.get('user_id'):
+        return RedirectResponse('/login', 303)
+    denied = access(request)
+    if denied is not None:
+        return denied
+    from modules.workflows import page
+    return HTMLResponse(page('Start Sales / Collection Visit', intake(request)))
+
+
 @router.get('/field/nearby')
 def nearby(request: Request, latitude: float, longitude: float):
     denied = access(request)
