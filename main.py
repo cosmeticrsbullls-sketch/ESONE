@@ -267,6 +267,7 @@ def command_center(request: Request):
              ("calls", "Calls & Collections", "Record calls, promises and follow-up outcomes.", "/calls/new"),
              ("demos", "Demo Bookings", "Schedule treatments and track conversion outcomes.", "/demos"),
              ("reports", "Reports & Follow-ups", "Courtesy queues, PTPs and filtered Excel exports.", "/operations")]
+    if role in {"SUPER_ADMIN", "MANAGEMENT"}: cards.append(("clients", "Staff Password Reset", "Reset an approved employee password with an audit record.", "/command-center/passwords"))
     if role == "SUPER_ADMIN": cards.append(("clients", "Team & Access", "Manage employee accounts and roles.", "/users"))
     modules = ''.join(f'<a class="module-card" href="{url}"><div class="module-icon">{icon(key)}</div><h3>{title}</h3><p>{description}</p><span class="open">Open workspace →</span></a>' for key,title,description,url in cards)
     return f'''<!doctype html><html><head><title>ESONE Command Center</title></head><body><main class="dashboard"><section class="hero"><div><div class="eyebrow">Command Center · {business_today().strftime('%d %b %Y')}</div><h1>Welcome, {name}</h1><p>Your clients, follow-ups and team activity in one place.</p></div><div class="actions"><a class="primary" href="/calls/new">+ Record Call</a><a class="secondary" href="/demos/new">+ Book Demo</a></div></section>{summary}<div class="section-heading"><h2>Your workspaces</h2><span style="font-size:12px;color:#87929c">ESONE · Earthshine Professional</span></div><section class="module-grid">{modules}</section></main></body></html>'''
@@ -300,6 +301,7 @@ def users_page(request: Request):
             <td>{escape(str(user.email))}</td>
             <td>{escape(str(user.role))}</td>
             <td>{status}</td>
+            <td>{f'<a href="/command-center/passwords/{user.id}">Reset password</a>' if user.id != request.session["user_id"] and user.is_active else "—"}</td>
         </tr>
         """
 
@@ -474,7 +476,7 @@ def users_page(request: Request):
                             <th>Name</th>
                             <th>Email</th>
                             <th>Role</th>
-                            <th>Status</th>
+                            <th>Status</th><th>Account action</th>
                         </tr>
                     </thead>
 
@@ -1216,3 +1218,6 @@ app.include_router(import_router)
 
 from modules.balance_import import router as balance_import_router
 app.include_router(balance_import_router)
+
+from modules.management_passwords import router as management_password_router
+app.include_router(management_password_router)
