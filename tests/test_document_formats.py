@@ -35,6 +35,19 @@ Credit''')
         self.assertEqual(parsed['total_quantity'],'5')
         self.assertEqual(parsed['warnings'],[])
         self.assertEqual(parsed['tax_lines'],[])
+    def test_image_header_columns_do_not_confuse_dates_or_customer(self):
+        parsed=parse_invoice('''Bill To Transportation Details Invoice Details
+TEST CLIENT Transport Name: Invoice No. : TEST/26/2
+TEST ADDRESS Vehicle Number: Due   Date : 06-11-2026
+TEST CITY Delivery Date: Date : 07-10-2026
+Contact No. : 9999999999 Delivery Location:
+Total 100.00''')
+        self.assertEqual(parsed['reference'],'TEST/26/2')
+        self.assertEqual(parsed['customer_name'],'TEST CLIENT')
+        self.assertEqual(parsed['customer_address'],'TEST ADDRESS\nTEST CITY')
+        self.assertEqual(parsed['document_date'],'2026-10-07')
+        self.assertEqual(parsed['due_date'],'2026-11-06')
+
     def test_mismatch_requires_review(self):
         parsed=parse_invoice('1 TEST 100.00 2 Pcs 50.00 90.00\nSub Total 100.00\nTotal 100.00\nReceived 10.00\nBalance 100.00')
         self.assertGreaterEqual(len(parsed['warnings']),3)

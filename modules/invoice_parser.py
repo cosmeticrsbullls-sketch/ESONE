@@ -11,20 +11,23 @@ def money(raw):return str(Decimal(raw.replace(',','')).quantize(Decimal('.01')))
 def parse_invoice(text):
     lines=[line.strip() for line in text.splitlines() if line.strip()]
     result={'items':[], 'warnings':[]}
-    number=re.search(r'(?im)^\s*(?:invoice|bill)\s*(?:no\.?|number|#)\s*:?\s*(\S+)',text)
+    number=re.search(r'(?i)\b(?:invoice|bill)\s*(?:no\.?|number|#)\s*:?\s*(\S+)',text)
     if number:result['reference']=number.group(1)
     for label,key in [('Date','document_date'),('Due Date','due_date')]:
-        found=re.search(r'(?im)^\s*'+label+r'\s*:\s*(\d{2}-\d{2}-\d{4})\s*$',text)
+        pattern=re.escape(label).replace(r'\ ',r'\s+')
+        candidates=re.finditer(r'(?i)\b'+pattern+r'\s*:\s*(\d{2}-\d{2}-\d{4})',text)
+        found=next((match for match in candidates if label!='Date' or not re.search(r'(?:Due|Delivery)\s+$',text[max(0,match.start()-25):match.start()],re.I)),None)
         if found:
             try:result[key]=datetime.strptime(found.group(1),'%d-%m-%Y').date().isoformat()
             except ValueError:result['warnings'].append('Invalid '+label)
     for index,line in enumerate(lines):
-        if line.lower()=='bill to' and index+1<len(lines):
-            result['customer_name']=lines[index+1]
+        if re.match(r'^bill to(?:\s|$)',line,re.I) and index+1<len(lines):
+            side_fields=r'\s+(?:Transport Name|Vehicle Number|Invoice No\.?|Due Date|Delivery Date|Date|Delivery Location)\s*:'
+            result['customer_name']=re.split(side_fields,lines[index+1],maxsplit=1,flags=re.I)[0].strip()
             address=[]
             for following in lines[index+2:]:
                 if re.match(r'Contact No|Transportation Details|Invoice Details',following,re.I):break
-                address.append(following)
+                address.append(re.split(side_fields,following,maxsplit=1,flags=re.I)[0].strip())
             result['customer_address']='\n'.join(address)
         if line.lower()=='payment mode' and index+1<len(lines):result['payment_mode']=lines[index+1]
         match=ITEM.match(line)

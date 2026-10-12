@@ -1,11 +1,7 @@
 """Bounded local OCR, original retention, reviewed and atomic ledger imports."""
 import hashlib
-import io
 import json
 import re
-import shutil
-import subprocess
-import tempfile
 from decimal import Decimal, InvalidOperation
 from html import escape
 from pathlib import Path
@@ -22,31 +18,9 @@ router=APIRouter()
 MAX_BYTES=10*1024*1024
 
 def extract_document(data):
-    """No external document transfer. Limits prevent oversized OCR workloads."""
-    if data.startswith(b'%PDF-'):
-        from pypdf import PdfReader
-        reader=PdfReader(io.BytesIO(data))
-        if reader.is_encrypted or not 1<=len(reader.pages)<=20:raise ValueError('Use an unencrypted PDF with at most 20 pages.')
-        text='\n'.join(p.extract_text() or '' for p in reader.pages)
-        if len(text.strip())>=30:return text[:100000],'application/pdf'
-        if not shutil.which('pdftoppm') or not shutil.which('tesseract'):raise ValueError('Scanned PDF OCR needs server OCR setup. Use a text PDF meanwhile.')
-        with tempfile.TemporaryDirectory() as directory:
-            source=Path(directory)/'source.pdf';source.write_bytes(data)
-            subprocess.run(['pdftoppm','-scale-to','2000','-png',str(source),str(Path(directory)/'page')],check=True,timeout=45,capture_output=True)
-            texts=[ocr_image(p) for p in sorted(Path(directory).glob('page-*.png'))]
-            return '\n'.join(texts)[:100000],'application/pdf'
-    from PIL import Image
-    with Image.open(io.BytesIO(data)) as image:
-        if image.format not in {'JPEG','PNG','WEBP'} or image.width*image.height>20000000:raise ValueError('Use JPEG, PNG or WebP up to 20 megapixels.')
-        image.load()
-        with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory)/'image.png';image.convert('RGB').save(path)
-            return ocr_image(path),'image/'+({'JPEG':'jpeg','PNG':'png','WEBP':'webp'}[image.format])
+    from modules.photo_ocr import extract
+    return extract(data)
 
-def ocr_image(path):
-    if not shutil.which('tesseract'):raise ValueError('Photo OCR needs administrator server setup. Use a text PDF meanwhile.')
-    result=subprocess.run(['tesseract',str(path),'stdout','-l','eng'],check=True,capture_output=True,timeout=30)
-    return result.stdout.decode('utf-8',errors='replace')[:100000]
 
 def suggestions(text):
     number=re.search(r'(?:invoice|bill|receipt)\s*(?:no\.?|number|#)\s*[:\-]?\s*([A-Za-z0-9/\-]+)',text,re.I)
@@ -60,7 +34,7 @@ def imports(request:Request):
     with SessionLocal() as db:
         entries=db.query(DocumentImport).order_by(DocumentImport.id.desc()).limit(50).all()
         rows=''.join(f'<p><a href="/imports/{d.id}">{escape(d.filename)}</a> · {d.status}</p>' for d in entries)
-    return HTMLResponse(page('Import bills and collections',f'<p>Capture or upload a document, review the extracted text and ledger fields, then confirm. No ledger entries are created before confirmation.</p><form method="post" enctype="multipart/form-data">{hidden(request)}<label>Document type<select name="kind"><option value="BILL">Bill</option><option value="COLLECTION">Previous collection receipt</option><option value="BALANCE_SHEET">Outstanding bill Excel sheet</option></select></label><label>Capture photo<input type="file" name="photo" accept="image/*" capture="environment"></label><label>Or upload image / PDF<input type="file" name="document" accept="image/jpeg,image/png,image/webp,application/pdf,.xlsx"></label><button>Extract and review</button></form>{rows}'))
+    return HTMLResponse(page('Import bills and collections',f'<p>Capture or upload a document, review the extracted text and ledger fields, then confirm. No ledger entries are created before confirmation.</p><form method="post" enctype="multipart/form-data" onsubmit="this.querySelector(&quot;button&quot;).textContent=&quot;Processing document...&quot;;this.querySelector(&quot;button&quot;).disabled=true;">{hidden(request)}<label>Document type<select name="kind"><option value="BILL">Bill</option><option value="COLLECTION">Previous collection receipt</option><option value="BALANCE_SHEET">Outstanding bill Excel sheet</option></select></label><label>Capture photo<input type="file" name="photo" accept="image/*" capture="environment"></label><label>Or upload image / PDF<input type="file" name="document" accept="image/jpeg,image/png,image/webp,application/pdf,.xlsx"></label><button>Extract and review</button></form>{rows}'))
 
 @router.post('/imports')
 async def upload(request:Request,kind:str=Form(...),csrf:str=Form(...),photo:UploadFile|None=File(None),document:UploadFile|None=File(None)):
@@ -82,9 +56,11 @@ async def upload(request:Request,kind:str=Form(...),csrf:str=Form(...),photo:Upl
             from modules.collection_sheet import parse_collection_sheet
             text=json.dumps(await run_in_threadpool(parse_collection_sheet,data));media='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         else:text,media=await run_in_threadpool(extract_document,data)
-    except Exception:
+    except Exception as error:
+        from modules.photo_ocr import ExtractionError
+        if isinstance(error,ExtractionError):return HTMLResponse(page('Document processing',f'<p>{escape(str(error))}</p>'),422)
         # Parser errors must never expose document content or filesystem paths.
-        return HTMLResponse(page('Extraction unavailable','<p>This file could not be read. Use a clear JPEG/PNG/WebP or unencrypted text PDF up to 20 pages. Photo/scanned PDF processing requires the server OCR runtime.</p>'),422)
+        return HTMLResponse(page('Extraction unavailable','<p>This file could not be read. Use a clear JPEG/PNG/WebP or unencrypted text PDF up to 20 pages. Upload outstanding Excel files up to 25 MB, or photos/text PDFs up to 10 MB.</p>'),422)
     if not text.strip():return HTMLResponse('No text detected. Upload a clearer document.',422)
     try:
         with SessionLocal.begin() as db:
@@ -109,14 +85,15 @@ def review(identity:int,request:Request):
         reference,amount=suggestions(entry.extracted_text)
         reference=parsed.get('reference',reference)
         amount=parsed.get('total',amount) if entry.kind=='BILL' else amount
-        item_rows=''.join('<tr>'+''.join(f'<td><input aria-label="{label}" name="item_{key}" value="{escape(str(item[key]),quote=True)}" required></td>' for key,label in [('name','Item'),('mrp','MRP'),('quantity','Quantity'),('unit','Unit'),('rate','Rate'),('amount','Amount')])+'</tr>' for item in parsed['items']) if entry.kind=='BILL' else ''
-        item_form=('<h3>Review item details</h3><div class="table"><table><tr><th>Item</th><th>MRP</th><th>Quantity</th><th>Unit</th><th>Rate</th><th>Amount</th></tr>'+item_rows+'</table></div>') if item_rows else ''
+        item_rows=''.join('<tr>'+''.join(f'<td><input aria-label="{label}" name="item_{key}" value="{escape(str(item[key]),quote=True)}" required></td>' for key,label in [('name','Item'),('mrp','MRP'),('quantity','Quantity'),('unit','Unit'),('rate','Rate'),('amount','Amount')])+'<td><button type="button" onclick="this.closest(\'tr\').remove()">Remove</button></td></tr>' for item in parsed['items']) if entry.kind=='BILL' else ''
+        item_form=('<h3>Review item details</h3><div class="table"><table><thead><tr><th>Item</th><th>MRP</th><th>Quantity</th><th>Unit</th><th>Rate</th><th>Amount</th><th>Action</th></tr></thead><tbody id="invoice-items">'+item_rows+'</tbody></table></div><button type="button" onclick="addInvoiceItem()">Add missing item</button>') if entry.kind=='BILL' else ''
+        item_form += """<script>function addInvoiceItem(){const row=document.createElement('tr');[['name','Item'],['mrp','MRP'],['quantity','Quantity'],['unit','Unit'],['rate','Rate'],['amount','Amount']].forEach(([key,label])=>{const cell=document.createElement('td');cell.dataset.label=label;const input=document.createElement('input');input.name='item_'+key;input.required=true;input.setAttribute('aria-label',label);cell.append(input);row.append(cell);});const cell=document.createElement('td');const remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.onclick=()=>row.remove();cell.append(remove);row.append(cell);document.getElementById('invoice-items').append(row);row.querySelector('input').focus();}</script>""" if entry.kind=='BILL' else ''
         customer_note=f"<p>Extracted customer: {escape(parsed.get('customer_name','Not detected'))} · {escape(parsed.get('customer_phone',''))}</p><p>{escape(parsed.get('customer_address',''))}</p>"
         warnings=''.join(f'<p class="error">{escape(w)}</p>' for w in parsed['warnings'])
         if parsed.get('previous_balance'):
             customer_note+=f"<p>Previous balance: {parsed['previous_balance']} · Current balance: {parsed.get('current_balance','Not detected')}. These are cumulative balances, not new invoice amounts.</p>"
         if entry.kind=='BILL' and not parsed['tax_lines']:customer_note+='<p>Separate GST/tax amounts are not shown or detected. Verify the original; no tax rate will be assumed.</p>'
-        bill_fields=(f'<label>Due date<input type="date" name="due_date" value="{escape(parsed.get("due_date",""),quote=True)}"></label><label>Amount already received for this invoice<input type="number" name="received" step="0.01" min="0" value="{parsed.get("received","0.00")}" required></label>'+item_form) if entry.kind=='BILL' else '' 
+        bill_fields=(f'<label>Due date<input type="date" name="due_date" value="{escape(parsed.get("due_date",""),quote=True)}"></label><label>Amount already received for this invoice<input type="number" name="received" step="0.01" min="0" value="{parsed.get("received","0.00")}" required></label>'+item_form) if entry.kind=='BILL' else ''
         clients=db.query(Client).order_by(Client.business_name).all()
         options=''.join(f'<option value="{c.id}">{escape(c.business_name)} — {escape(c.phone or "")}</option>' for c in clients)
         form='' if entry.status=='CONFIRMED' else f'''<form method="post">{hidden(request)}<label>Match registered client<select name="client_id" required><option value="">Select client</option>{options}</select></label><label>Invoice / receipt reference<input name="reference" maxlength="50" value="{escape(reference,quote=True)}" required></label><label>Document date<input name="document_date" type="date" value="{parsed.get('document_date','')}" required></label><label>Total amount<input name="amount" type="number" min="0.01" max="9999999999.99" step="0.01" value="{escape(amount,quote=True)}" required></label>{bill_fields}<label>For collection: existing ESONE bill ID<input name="bill_id" type="number" min="1"></label><label>Payment mode<input name="payment_mode" maxlength="30" value="{escape(parsed.get('payment_mode',''),quote=True)}"></label><label>Reviewed details / line items / taxes<textarea name="details" maxlength="100000">{escape(entry.extracted_text)}</textarea></label><label><input type="checkbox" name="adjust_balance" value="yes">Update current outstanding balance (leave unchecked when this history is already included in the current balance).</label><label><input type="checkbox" name="confirmed" value="yes" required>I checked the client, amount, date and all details against the original document.</label><button>Confirm and add to ledger</button></form>'''
