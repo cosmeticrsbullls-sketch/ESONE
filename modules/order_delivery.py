@@ -18,4 +18,14 @@ def send_confirmation(recipient,salon,reference,order_date,total):
         identity=result['messages'][0]['id']
         if not isinstance(identity,str) or not 1<=len(identity)<=150:raise ValueError()
         return identity
-    except (OSError,ValueError,KeyError,IndexError,TypeError):raise DeliveryError('WhatsApp could not accept the order. Check template approval and sender configuration; no successful send is recorded.') from None
+    except urllib.error.HTTPError as error:
+        # Show only numeric diagnostics, never provider text, tokens or recipient data.
+        details=f'Meta HTTP {error.code}'
+        try:
+            failure=json.loads(error.read(65536)).get('error',{})
+            for key in ('code','error_subcode'):
+                value=failure.get(key)
+                if type(value) is int:details+=f'; {key} {value}'
+        except (OSError,ValueError,AttributeError,TypeError):pass
+        raise DeliveryError(details+'. Order confirmation was not accepted. Contact Command Center with this code.') from None
+    except (OSError,ValueError,KeyError,IndexError,TypeError):raise DeliveryError('WhatsApp connection or response failed; acceptance is unknown. Check WhatsApp before retrying.') from None
