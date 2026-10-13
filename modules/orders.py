@@ -111,7 +111,7 @@ def send_order(order_id:int,request:Request,csrf:str=Form('')):
         if recent:return HTMLResponse('Wait five minutes before retrying a failed order send. Check WhatsApp first to avoid duplicate delivery.',429)
         log=CommunicationLog(client_id=c.id,activity_id=a.id,purpose='ORDER_CONFIRMATION',recipient=c.whatsapp_phone or c.phone,send_mode='API',created_by=request.session['user_id'],created_at=now());db.add(log)
         try:
-            log.provider_message_id=send_confirmation(c.whatsapp_phone or c.phone,c.business_name,o.order_number,str(o.total_amount));log.status='ACCEPTED';log.sent_at=now()
+            log.provider_message_id=send_confirmation(c.whatsapp_phone or c.phone,c.business_name,o.order_number,o.created_at,str(o.total_amount));log.status='ACCEPTED';log.sent_at=now()
         except DeliveryError as e:log.status='FAILED';log.failure_reason=str(e)
         audit(db,request,'SalesOrder',order_id,'ORDER_WHATSAPP',new=log.status)
     return RedirectResponse(f'/orders/{order_id}',303)
