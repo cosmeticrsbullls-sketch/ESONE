@@ -54,6 +54,18 @@ def send_otp(recipient, code):
         message_id = result['messages'][0]['id']
         if not isinstance(message_id,str) or not message_id or len(message_id)>150: raise ValueError()
         return message_id
-    except (urllib.error.HTTPError,urllib.error.URLError,TimeoutError,OSError,ValueError,KeyError,IndexError,TypeError):
+    except urllib.error.HTTPError as error:
+        # Only expose numeric Meta error codes, never provider text, OTPs, or tokens.
+        detail = f'Meta HTTP {error.code}'
+        try:
+            failure = json.loads(error.read(65536)).get('error', {})
+            for key in ('code', 'error_subcode'):
+                value = failure.get(key)
+                if type(value) is int:
+                    detail += f'; {key} {value}'
+        except (OSError, ValueError, AttributeError, TypeError):
+            pass
+        raise DeliveryError(detail + '. WhatsApp OTP was not accepted. Your visit remains in progress; contact Command Center.') from None
+    except (urllib.error.URLError,TimeoutError,OSError,ValueError,KeyError,IndexError,TypeError):
         # Provider responses can contain personal data, tokens or the OTP; never echo them.
         raise DeliveryError('WhatsApp could not accept the OTP message. Management should check sender access and template approval. Please retry later; your visit remains in progress.') from None
