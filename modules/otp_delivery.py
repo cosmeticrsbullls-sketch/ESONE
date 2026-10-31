@@ -43,8 +43,7 @@ def send_otp(recipient, code):
     number = recipient_number(recipient)
     payload = {'messaging_product':'whatsapp','recipient_type':'individual','to':number,'type':'template',
                'template':{'name':config['WHATSAPP_OTP_TEMPLATE'],'language':{'code':config['language']},
-                           'components':[{'type':'body','parameters':[{'type':'text','text':code}]},
-                                         {'type':'button','sub_type':'url','index':'0','parameters':[{'type':'text','text':code}]}]}}
+                           'components':[{'type':'body','parameters':[{'type':'text','text':code}]}]}}
     url = f"https://graph.facebook.com/{config['WHATSAPP_API_VERSION']}/{config['WHATSAPP_PHONE_NUMBER_ID']}/messages"
     request = urllib.request.Request(url,data=json.dumps(payload).encode(),method='POST',
                                      headers={'Authorization':f"Bearer {config['WHATSAPP_ACCESS_TOKEN']}",'Content-Type':'application/json'})
