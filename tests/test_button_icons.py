@@ -5,7 +5,7 @@ from modules.ui import enhance,icon
 
 class ButtonIconTests(unittest.TestCase):
     def test_action_meanings(self):
-        for label,key in [('Sales','sales'),('Collection','collection'),('Demo','demo'),('Book Order','order'),('Punch In','in'),('Punch Out','out'),('Share','share'),('Download PDF','download'),('Save Client','save'),('Edit educator','edit'),('Delete','delete'),('Search','search')]:
+        for label,key in [('Sales','sales'),('Collection','collection'),('Demo','demo'),('Book Order','order'),('Punch In','in'),('Punch Out','out'),('Share','share'),('Download PDF','download'),('Save Client','save'),('Edit educator','edit'),('Delete','delete'),('Search','search'),('Import bills and previous collections','add')]:
             with self.subTest(label=label):self.assertEqual(action_key(label),key)
 
     def test_form_and_script_bytes_are_preserved(self):
