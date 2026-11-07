@@ -23,6 +23,34 @@ class OtpTests(unittest.TestCase):
         self.assertEqual(self.client.post('/visits/6/start',data={'latitude':23,'longitude':72}).status_code,200)
         return {'notes':'Meeting complete','csrf':self.csrf}
 
+    def test_paused_otp_completes_only_owned_started_visit(self):
+        data=self.begin_visit()
+        with patch.dict(os.environ,{'ESONE_REQUIRE_ACTIVITY_OTP':'false'}),patch('modules.otp_delivery.send_otp') as send:
+            page=self.client.get('/visits/6').text
+            self.assertIn('COMPLETE VISIT',page)
+            self.assertNotIn('SEND END OTP',page)
+            self.assertEqual(self.client.post('/visits/6/complete',data={**data,'csrf':''}).status_code,403)
+            self.assertEqual(self.client.post('/visits/6/complete',data={**data,'notes':'  '}).status_code,400)
+            self.login('b')
+            self.assertEqual(self.client.post('/visits/6/complete',data={'notes':'Done','csrf':self.csrf}).status_code,403)
+            self.login('a');data['csrf']=self.csrf
+            self.assertEqual(self.client.post('/visits/6/request-end-otp',data=data).status_code,409)
+            self.assertEqual(self.client.post('/visits/6/complete',data=data,follow_redirects=False).status_code,303)
+            self.assertEqual(self.client.post('/visits/6/complete',data=data).status_code,409)
+            send.assert_not_called()
+        from database.models import Visit, AuditLog
+        with SessionLocal() as db:
+            self.assertEqual(db.get(Activity,6).status,'COMPLETED')
+            self.assertIsNotNone(db.query(Visit).filter_by(activity_id=6).one().check_out_at)
+            self.assertEqual(db.query(VerificationOTP).count(),0)
+            self.assertEqual(db.query(AuditLog).filter_by(action='COMPLETE_WITHOUT_OTP').count(),1)
+
+    def test_direct_completion_cannot_bypass_enabled_otp(self):
+        data=self.begin_visit()
+        with patch.dict(os.environ,{'ESONE_REQUIRE_ACTIVITY_OTP':'true'}):
+            self.assertEqual(self.client.post('/visits/6/complete',data=data).status_code,409)
+        with SessionLocal() as db:self.assertEqual(db.get(Activity,6).status,'IN_PROGRESS')
+
     def test_provider_acceptance_and_verify(self):
         data=self.begin_visit()
         with patch.dict(os.environ,CONFIG),patch('modules.otp_delivery.send_otp',return_value='wamid.test') as send:
@@ -87,3 +115,4 @@ class TransportTests(unittest.TestCase):
         self.assertNotIn('unit-test-token',str(error.exception));self.assertNotIn('123456',str(error.exception))
 
 del OperationsTests
+
