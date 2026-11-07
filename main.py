@@ -953,6 +953,10 @@ def _distance_m(lat1, lon1, lat2, lon2):
 def _otp_hash(code):
     return hashlib.sha256(code.encode()).hexdigest()
 
+def activity_otp_required():
+    """Set ESONE_REQUIRE_ACTIVITY_OTP=false to pause customer OTP checks."""
+    return os.getenv("ESONE_REQUIRE_ACTIVITY_OTP", "true").strip().lower() not in {"false", "0", "no", "off"}
+
 def _visit_access(request):
     return request.session.get("role") in {"SUPER_ADMIN","MANAGEMENT","OFFICE","SALES"}
 
@@ -1006,9 +1010,11 @@ def visit_detail(activity_id:int, request:Request):
         from modules.workflows import hidden
         csrf_field=hidden(request)
         end_block='''<form method="post" action="/visits/%s/request-end-otp">%s<label>Outcome / Notes</label><input name="notes" style="width:100%%;padding:12px;margin:8px 0" required><button>SEND END OTP</button></form>'''%(activity_id,csrf_field) if a.status=="IN_PROGRESS" else ""
+        if a.status=="IN_PROGRESS" and not activity_otp_required():
+            end_block=f'<form method="post" action="/visits/{activity_id}/complete">{csrf_field}<label>Outcome / Notes</label><textarea name="notes" maxlength="4000" required></textarea><p>Customer OTP verification is temporarily paused.</p><button>COMPLETE VISIT</button></form>'
         otp=db.query(VerificationOTP).filter(VerificationOTP.activity_id==activity_id,VerificationOTP.purpose=="VISIT_END",VerificationOTP.status=="PENDING").order_by(VerificationOTP.id.desc()).first()
         otp_block=''
-        if otp:
+        if otp and a.status=="IN_PROGRESS" and activity_otp_required():
             otp_block=f'''<form method="post" action="/visits/{activity_id}/verify-end-otp">{csrf_field}<h3>Customer End OTP</h3><input name="otp" inputmode="numeric" maxlength="6" required><button>VERIFY & COMPLETE</button></form>'''
         from modules.enhancements import map_link
         maps = '<p>' + ' · '.join(map_link(label,lat,lon) for label,lat,lon in [('Salon on Google Maps',c.latitude,c.longitude),('Check-in on Google Maps',v.check_in_latitude,v.check_in_longitude),('Check-out on Google Maps',v.check_out_latitude,v.check_out_longitude)] if lat is not None and lon is not None) + '</p>'
@@ -1045,8 +1051,31 @@ def _visit_csrf(request, csrf):
         return HTMLResponse("Please reload the visit page and try again.",403)
 
 
+@app.post("/visits/{activity_id}/complete")
+def complete_visit_without_otp(activity_id:int, request:Request, notes:str=Form(""), csrf:str=Form("")):
+    if not request.session.get("user_id"):return RedirectResponse("/",303)
+    with SessionLocal.begin() as db:
+        a=db.query(Activity).filter_by(id=activity_id).with_for_update().first()
+        v=db.query(Visit).filter_by(activity_id=activity_id).first()
+        if not a or not v:return HTMLResponse("Visit not found",404)
+        if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
+        denied=_visit_csrf(request,csrf)
+        if denied is not None:return denied
+        if activity_otp_required():return HTMLResponse("Customer OTP is required. Reload the visit page.",409)
+        if a.status!="IN_PROGRESS" or v.check_in_at is None:return HTMLResponse("Visit must be started before completion.",409)
+        notes=notes.strip()
+        if not notes or len(notes)>4000:return HTMLResponse("Provide visit notes of 1–4000 characters.",400)
+        completed=datetime.now()
+        a.notes=notes;a.status="COMPLETED";a.completed_at=completed;v.check_out_at=completed
+        for pending in db.query(VerificationOTP).filter_by(activity_id=activity_id,purpose="VISIT_END",status="PENDING"):
+            pending.status="CANCELLED"
+        db.add(AuditLog(user_id=request.session["user_id"],entity_type="VISIT",entity_id=v.id,action="COMPLETE_WITHOUT_OTP",old_value="IN_PROGRESS",new_value="Customer OTP verification paused; employee completed visit."))
+    return RedirectResponse("/workspace",303)
+
+
 @app.post("/visits/{activity_id}/request-end-otp")
 def request_visit_end_otp(activity_id:int,request:Request,notes:str=Form(""),csrf:str=Form("")):
+    if not activity_otp_required():return HTMLResponse("OTP verification is paused. Reload the visit page to complete the visit.",409)
     from modules.otp_delivery import DeliveryError, send_otp, settings, test_mode
     from modules.workflows import page
     if not request.session.get("user_id"):return RedirectResponse("/",303)
@@ -1089,6 +1118,7 @@ def request_visit_end_otp(activity_id:int,request:Request,notes:str=Form(""),csr
 
 @app.post("/visits/{activity_id}/verify-end-otp")
 def verify_visit_end_otp(activity_id:int,request:Request,otp:str=Form(...),csrf:str=Form("")):
+    if not activity_otp_required():return HTMLResponse("OTP verification is paused. Reload the visit page.",409)
     if not request.session.get("user_id"):return RedirectResponse("/",303)
     with SessionLocal.begin() as db:
         a=db.query(Activity).filter_by(id=activity_id).with_for_update().first()
@@ -1233,3 +1263,4 @@ from modules.activity_reports import router as activity_report_router
 app.include_router(activity_report_router)
 from modules.notifications import router as notifications_router
 app.include_router(notifications_router)
+
