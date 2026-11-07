@@ -17,7 +17,7 @@ class HomeAttendanceTests(unittest.TestCase):
         response = self.client.get('/workspace')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers['cache-control'], 'no-store')
-        return re.search(r'<a class="secondary" href="/attendance">([^<]+)</a>', response.text)[1]
+        return re.search(r'<a class="secondary" href="/attendance"[^>]*>([^<]+)</a>', response.text)[1]
 
     def test_punch_label_tracks_full_attendance_cycle(self):
         self.login('a')
@@ -25,10 +25,10 @@ class HomeAttendanceTests(unittest.TestCase):
         data=dict(csrf=self.csrf,latitude=23,longitude=72,accuracy=12)
         self.assertEqual(self.client.post('/attendance',data={**data,'action':'IN'},follow_redirects=False).status_code,303)
         self.assertEqual(self.label(), 'Punch Out')
-        self.assertIn('<button>Punch Out</button>',self.client.get('/attendance').text)
+        self.assertRegex(self.client.get('/attendance').text,r'<button[^>]*>Punch Out</button>')
         self.assertEqual(self.client.post('/attendance',data={**data,'action':'OUT'},follow_redirects=False).status_code,303)
         self.assertEqual(self.label(), 'Punch In')
-        self.assertIn('<button>Punch In</button>',self.client.get('/attendance').text)
+        self.assertRegex(self.client.get('/attendance').text,r'<button[^>]*>Punch In</button>')
 
     def test_another_employee_open_punch_does_not_change_own_label(self):
         with SessionLocal.begin() as db:

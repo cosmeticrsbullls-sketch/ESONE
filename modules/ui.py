@@ -1,6 +1,7 @@
 """Shared ESONE presentation; no business records are changed here."""
 from html import escape
 from pathlib import Path
+from modules.button_icons import CSS as ACTION_ICON_CSS, decorate_controls, svg as action_svg
 
 LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "earthshine-logo.png"
 
@@ -33,10 +34,11 @@ ICONS = {
  'reports':'<path d="M4 3v18h17M8 16v-5M13 16V7M18 16v-8"/>',
 }
 def icon(key):
-    return '<span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24">'+ICONS[key]+'</svg></span>'
+    mapped={'dashboard':'home','clients':'users','visits':'sales','calls':'call','demos':'demo','reports':'reports','collection':'collection','order':'order','attendance':'in'}
+    return '<span class="nav-icon">'+action_svg(mapped.get(key,key))+'</span>'
 
 def notification_bell():
-    return '<a class="header-notifications" href="/notifications" aria-label="Notifications" title="Notifications"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M10 21h4"/></svg><span class="notification-count" hidden></span></a>'
+    return '<a class="header-notifications" href="/notifications" aria-label="Notifications" title="Notifications">'+action_svg('bell')+'<span class="notification-count" hidden></span></a>'
 
 NOTIFICATION_SCRIPT = r'''<script>(()=>{
 const bell=document.querySelector('.header-notifications');if(!bell)return;
@@ -69,9 +71,9 @@ CSS += '''
 
 def navigation(path, name, role):
     management=role in {'SUPER_ADMIN','MANAGEMENT','OFFICE'}
-    links=[('/workspace','Home','dashboard'),('/workspace/sales','Sales','visits'),('/workspace/collection','Collection','calls'),('/workspace/demo','Demo','demos'),('/orders','Book Order','reports'),('/attendance','Attendance','visits'),('/notifications','Notifications','calls')]
+    links=[('/workspace','Home','dashboard'),('/workspace/sales','Sales','visits'),('/workspace/collection','Collection','collection'),('/workspace/demo','Demo','demos'),('/orders','Book Order','order'),('/attendance','Attendance','attendance'),('/notifications','Notifications','bell')]
     if management:links += [('/command-center','Command Center','reports')]
-    links += [('/account/password','Change Password','clients')]
+    links += [('/account/password','Change Password','lock')]
     items=''.join(f'<a href="{url}" class="{"active" if path==url or (url not in {"/workspace","/command-center","/mobile","/calls/new"} and path.startswith(url+"/")) or (url=="/operations" and path.startswith("/ptps/")) else ""}">{icon(key)}{label}</a>' for url,label,key in links)
     current=next((label for url,label,key in sorted(links,key=lambda item:len(item[0]),reverse=True) if path==url or path.startswith(url+'/')),'Workspace')
     dropdown='<label class="mobile-menu">Menu<select aria-label="Main menu" onchange="if(this.value)location.href=this.value">'+''.join(f'<option value="{url}" {"selected" if label==current else ""}>{label}</option>' for url,label,key in links)+'</select></label>'
@@ -80,7 +82,7 @@ def navigation(path, name, role):
 
 def enhance(document, path, name='', role='', signed_in=False):
     if '</head>' not in document or '<body' not in document:return document
-    document=document.replace('</head>','<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/assets/esone.css?v=6"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png"><meta name="theme-color" content="#f5f6f8"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="ESONE"><meta name="apple-mobile-web-app-status-bar-style" content="default"></head>',1)
+    document=document.replace('</head>','<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/assets/esone.css?v=7"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png"><meta name="theme-color" content="#f5f6f8"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="ESONE"><meta name="apple-mobile-web-app-status-bar-style" content="default"></head>',1)
     start=document.index('<body');end=document.index('>',start)
     is_login=path in {'/','/login','/login/'} and not signed_in
     cls='esone-login' if is_login else 'esone-app'
@@ -91,7 +93,7 @@ def enhance(document, path, name='', role='', signed_in=False):
     if signed_in:
         document=document.replace('</body>', NOTIFICATION_SCRIPT+ACTION_FEEDBACK_SCRIPT+'</body>')
         document=document.replace('</body>', '<script>document.querySelectorAll("table").forEach(t=>{const labels=Array.from(t.querySelectorAll("thead th, tr:first-child th")).map(x=>x.textContent.trim());t.querySelectorAll("tr").forEach(r=>r.querySelectorAll("td").forEach((d,i)=>d.dataset.label=labels[i]||""));});</script></body>')
-    return document
+    return decorate_controls(document)
 
 CSS += """
 .workspace-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.workspace-buttons a{display:flex;align-items:center;justify-content:center;min-height:180px;font-size:32px;font-weight:700;border:1px solid #d7b666;border-radius:18px;background:#fff8e8}.esone-app img{max-width:100%;height:auto}.esone-app main{min-width:0}.esone-app textarea{width:100%;min-height:100px}.esone-app td{overflow-wrap:anywhere}
@@ -151,3 +153,5 @@ CSS += """
 @media(max-width:480px){.workspace-action-grid{grid-template-columns:1fr;gap:12px}.esone-app .workspace-action-grid a.secondary{min-height:76px!important}}
 @media(prefers-reduced-motion:reduce){.esone-app :is(button,a,input){transition:none!important}}
 """
+
+CSS += ACTION_ICON_CSS

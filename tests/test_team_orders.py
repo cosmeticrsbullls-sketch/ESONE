@@ -69,7 +69,7 @@ class TeamOrderTests(unittest.TestCase):
         with SessionLocal() as db:self.assertEqual(db.query(SalesOrder).count(),0)
         r=self.client.post('/orders',data=self.order(),follow_redirects=False);url=r.headers['location'];d={'csrf':self.form('/orders/new')['csrf']}
         detail=self.client.get(url).text
-        self.assertIn('class="share-pdf">Share</button>',detail)
+        self.assertRegex(detail,r'class="share-pdf"[^>]*>Share</button>')
         self.assertNotIn('Send Order via connected WhatsApp',detail)
         self.assertNotIn('Share PDF to WhatsApp',detail)
         with patch('modules.order_delivery.send_confirmation',side_effect=DeliveryError('Not connected')):
