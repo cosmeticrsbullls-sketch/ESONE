@@ -3,7 +3,7 @@ from html import escape
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from database.db import SessionLocal
-from database.models import Activity, AuditLog, User, VerificationOTP, Visit
+from database.models import Activity, Attendance, AuditLog, User, VerificationOTP, Visit
 from modules.security import hash_password, verify_password
 from modules.workflows import guard, hidden, now, page
 
@@ -16,11 +16,14 @@ def map_link(label, latitude, longitude):
 @router.get('/workspace', response_class=HTMLResponse)
 def workspace(request: Request):
     if not request.session.get('user_id'): return RedirectResponse('/',303)
+    with SessionLocal() as db:
+        opened = db.query(Attendance.id).filter_by(user_id=request.session['user_id'], punch_out_at=None).first()
+    punch_label = 'Punch Out' if opened else 'Punch In'
     content = '<div class="workspace-buttons"><a href="/workspace/sales">Sales</a><a href="/workspace/collection">Collection</a><a href="/workspace/demo">Demo</a><a href="/orders/new">Book Order</a></div>'
     if request.session.get('role') in MANAGEMENT:
         content += '<p><a href="/command-center">Open Command Center</a></p>'
-    content += '<div class="home-quick-actions" aria-label="Attendance and reports"><a class="secondary" href="/attendance">Punch In / Out</a><a class="secondary" href="/activity-reports">My Daily / Monthly Reports</a></div>'
-    return HTMLResponse(page('Home',content))
+    content += f'<div class="home-quick-actions" aria-label="Attendance and reports"><a class="secondary" href="/attendance">{punch_label}</a><a class="secondary" href="/activity-reports">My Daily / Monthly Reports</a></div>'
+    return HTMLResponse(page('Home',content), headers={'Cache-Control':'no-store'})
 
 @router.get('/workspace/{section}', response_class=HTMLResponse)
 def section(request: Request, section: str):
