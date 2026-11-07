@@ -67,7 +67,11 @@ class TeamOrderTests(unittest.TestCase):
         for bad in [{'qty_ES-01':'1.5'},{'discount_ES-01':'101'},{'discount_ES-01':'NaN'},{'discount_ES-01':'0.001'},{'qty_ES-01':'-2'},{'csrf':'bad'}]:
             self.assertIn(self.client.post('/orders',data=self.order(**bad)).status_code,[400,403])
         with SessionLocal() as db:self.assertEqual(db.query(SalesOrder).count(),0)
-        r=self.client.post('/orders',data=self.order(),follow_redirects=False);url=r.headers['location'];d=self.form(url)
+        r=self.client.post('/orders',data=self.order(),follow_redirects=False);url=r.headers['location'];d={'csrf':self.form('/orders/new')['csrf']}
+        detail=self.client.get(url).text
+        self.assertIn('class="share-pdf">Share</button>',detail)
+        self.assertNotIn('Send Order via connected WhatsApp',detail)
+        self.assertNotIn('Share PDF to WhatsApp',detail)
         with patch('modules.order_delivery.send_confirmation',side_effect=DeliveryError('Not connected')):
             self.assertEqual(self.client.post(url+'/send',data=d,follow_redirects=False).status_code,303)
         with SessionLocal() as db:self.assertEqual(db.query(CommunicationLog).one().status,'FAILED')
@@ -107,3 +111,4 @@ class TeamOrderTests(unittest.TestCase):
         with SessionLocal() as db:self.assertEqual(db.query(Client).filter_by(business_name='New Salon').count(),1)
 
 del OperationsTests
+
