@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, Image
 
 def pdf_bytes(title,headers,rows,summary=''):
     stream=BytesIO();styles=getSampleStyleSheet()
@@ -22,7 +22,13 @@ def pdf_bytes(title,headers,rows,summary=''):
         return Paragraph(markup,style)
     size=landscape(A4) if len(headers)>5 else A4
     doc=SimpleDocTemplate(stream,pagesize=size,rightMargin=28,leftMargin=28,topMargin=40,bottomMargin=40)
-    story=[Paragraph(escape('ESONE | '+title),styles['Title']),cell(summary),Spacer(1,16)]
+    logo=Path(__file__).resolve().parent.parent / 'assets/earthshine-logo.png'
+    branding=[]
+    if logo.exists():
+        from PIL import Image as PillowImage
+        with PillowImage.open(logo) as im: ratio=im.width/im.height
+        branding=[Image(str(logo),width=min(135,65*ratio),height=min(65,135/ratio)),Spacer(1,12)]
+    story=branding+[Paragraph(escape('ESONE | '+title),styles['Title']),cell(summary),Spacer(1,16)]
     width=size[0]-56
     weights=[3,0.7,1.2,1,1.3] if headers and headers[0]=='Product' else [1]*len(headers)
     widths=[width*w/sum(weights) for w in weights]
