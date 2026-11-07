@@ -35,6 +35,38 @@ ICONS = {
 def icon(key):
     return '<span class="nav-icon"><svg aria-hidden="true" viewBox="0 0 24 24">'+ICONS[key]+'</svg></span>'
 
+def notification_bell():
+    return '<a class="header-notifications" href="/notifications" aria-label="Notifications" title="Notifications"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M10 21h4"/></svg><span class="notification-count" hidden></span></a>'
+
+NOTIFICATION_SCRIPT = r'''<script>(()=>{
+const bell=document.querySelector('.header-notifications');if(!bell)return;
+const badge=bell.querySelector('.notification-count');
+async function updateNotifications(){
+ try{
+  const response=await fetch('/notifications/count',{cache:'no-store',headers:{Accept:'application/json'}});
+  if(!response.ok||response.redirected)return;
+  const data=await response.json();const count=data.unread;
+  if(!Number.isInteger(count)||count<0)return;
+  badge.hidden=count===0;badge.textContent=String(count);
+  bell.classList.toggle('has-unread',count>0);
+  bell.setAttribute('aria-label',count>0?'Notifications, '+count+' unread':'Notifications, no unread updates');
+  bell.title=count>0?count+' unread notifications':'No unread notifications';
+ }catch(error){}
+}
+updateNotifications();setInterval(()=>{if(!document.hidden)updateNotifications();},60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)updateNotifications();});
+})();</script>'''
+
+CSS += '''
+.home-quick-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:20px;width:100%;max-width:760px}
+.esone-app .home-quick-actions a{display:flex;align-items:center;justify-content:center;text-align:center;min-height:68px!important;width:100%;height:100%;margin:0!important;box-sizing:border-box;line-height:1.4}
+.esone-topbar .header-notifications{position:relative;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;flex:0 0 44px;margin-right:12px;border:1px solid #dce2e8;border-radius:12px;color:#52616d!important;background:#fff;text-decoration:none}
+.header-notifications svg{width:23px;height:23px}.header-notifications.has-unread{background:#fff5f3;border-color:#edb3aa;color:#b93829!important}
+.header-notifications .notification-count{position:absolute;right:-6px;top:-7px;display:flex;align-items:center;justify-content:center;min-width:21px;height:21px;padding:0 5px;border-radius:20px;background:#c9362b;color:#fff;font-size:11px;font-weight:700;border:2px solid #fff;box-sizing:content-box}
+.header-notifications .notification-count[hidden]{display:none!important}.header-notifications:focus-visible{outline:3px solid #b58b39;outline-offset:3px}
+@media(max-width:600px){.home-quick-actions{gap:10px}.esone-app .home-quick-actions a{font-size:13px!important;padding:12px 8px!important;min-height:72px!important}.esone-topbar .account-name{display:none}.esone-topbar .header-notifications{margin-right:8px}}
+'''
+
 def navigation(path, name, role):
     management=role in {'SUPER_ADMIN','MANAGEMENT','OFFICE'}
     links=[('/workspace','Home','dashboard'),('/workspace/sales','Sales','visits'),('/workspace/collection','Collection','calls'),('/workspace/demo','Demo','demos'),('/orders','Book Order','reports'),('/attendance','Attendance','visits'),('/notifications','Notifications','calls')]
@@ -44,7 +76,7 @@ def navigation(path, name, role):
     current=next((label for url,label,key in sorted(links,key=lambda item:len(item[0]),reverse=True) if path==url or path.startswith(url+'/')),'Workspace')
     dropdown='<label class="mobile-menu">Menu<select aria-label="Main menu" onchange="if(this.value)location.href=this.value">'+''.join(f'<option value="{url}" {"selected" if label==current else ""}>{label}</option>' for url,label,key in links)+'</select></label>'
     initial=escape((name or 'E')[0].upper())
-    return f'''<aside class="esone-sidebar" aria-label="Main navigation"><a class="esone-brand" href="/workspace">ES<span>ONE</span></a><div class="esone-caption">Business workspace</div>{brand_mark()}<div class="nav-label">WORKSPACE</div><nav class="esone-links">{items}</nav>{dropdown}<div class="sidebar-foot">Earthshine business operations<br>One connected workspace.</div></aside><div class="esone-topbar"><div class="breadcrumb">Workspace / <strong>{current}</strong></div><div class="account"><span class="avatar">{initial}</span><div class="account-name">{escape(name)}<small>{escape(role.replace('_',' ').title())}</small></div><a class="logout" href="/logout">Sign out</a></div></div>'''
+    return f'''<aside class="esone-sidebar" aria-label="Main navigation"><a class="esone-brand" href="/workspace">ES<span>ONE</span></a><div class="esone-caption">Business workspace</div>{brand_mark()}<div class="nav-label">WORKSPACE</div><nav class="esone-links">{items}</nav>{dropdown}<div class="sidebar-foot">Earthshine business operations<br>One connected workspace.</div></aside><div class="esone-topbar"><div class="breadcrumb">Workspace / <strong>{current}</strong></div><div class="account">{notification_bell()}<span class="avatar">{initial}</span><div class="account-name">{escape(name)}<small>{escape(role.replace('_',' ').title())}</small></div><a class="logout" href="/logout">Sign out</a></div></div>'''
 
 def enhance(document, path, name='', role='', signed_in=False):
     if '</head>' not in document or '<body' not in document:return document
@@ -57,6 +89,7 @@ def enhance(document, path, name='', role='', signed_in=False):
     if is_login:document=document.replace('<div class="login-box">','<div class="login-box">'+brand_mark(),1)
     if is_login:document=document.replace('</form>','</form><p><a href="/forgot-password">Forgot password?</a></p><div class="login-foot">Earthshine Professional · Business workspace</div>',1)
     if signed_in:
+        document=document.replace('</body>', NOTIFICATION_SCRIPT+'</body>')
         document=document.replace('</body>', '<script>document.querySelectorAll("table").forEach(t=>{const labels=Array.from(t.querySelectorAll("thead th, tr:first-child th")).map(x=>x.textContent.trim());t.querySelectorAll("tr").forEach(r=>r.querySelectorAll("td").forEach((d,i)=>d.dataset.label=labels[i]||""));});</script></body>')
     return document
 
