@@ -19,8 +19,7 @@ def workspace(request: Request):
     content = '<div class="workspace-buttons"><a href="/workspace/sales">Sales</a><a href="/workspace/collection">Collection</a><a href="/workspace/demo">Demo</a><a href="/orders/new">Book Order</a></div>'
     if request.session.get('role') in MANAGEMENT:
         content += '<p><a href="/command-center">Open Command Center</a></p>'
-    from modules.notifications import inbox_card
-    content += '<div class="actions"><a class="secondary" href="/attendance">Punch In / Out</a><a class="secondary" href="/activity-reports">My Daily / Monthly Reports</a></div>'+inbox_card(request)
+    content += '<div class="home-quick-actions" aria-label="Attendance and reports"><a class="secondary" href="/attendance">Punch In / Out</a><a class="secondary" href="/activity-reports">My Daily / Monthly Reports</a></div>'
     return HTMLResponse(page('Home',content))
 
 @router.get('/workspace/{section}', response_class=HTMLResponse)
