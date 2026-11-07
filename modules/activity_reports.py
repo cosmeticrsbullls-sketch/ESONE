@@ -31,7 +31,7 @@ def scope(request,employee_id):
         return request.session['user_id']
     return employee_id
 
-def report_data(db,employee_id,first,last):
+def report_data(db,employee_id,first,last,with_links=False):
     zone=ZoneInfo('Asia/Kolkata')
     lower=datetime.combine(first,time.min).replace(tzinfo=zone).astimezone(timezone.utc).replace(tzinfo=None)
     upper=datetime.combine(last+timedelta(days=1),time.min).replace(tzinfo=zone).astimezone(timezone.utc).replace(tzinfo=None)
@@ -49,12 +49,15 @@ def report_data(db,employee_id,first,last):
             receipt=db.query(CollectionActivity).filter_by(activity_id=a.id).first()
             if receipt:detail+=f' | Received INR {receipt.amount_received or 0}'
         rows.append([people.get(a.created_by or a.assigned_user_id,'Unassigned'),a.activity_type,c.business_name,a.status,local(a.created_at)+(' / '+local(a.completed_at) if a.completed_at else ''),detail])
+        if with_links:rows[-1].append(f'/activities/{a.id}/share')
     punches=db.query(Attendance).filter(Attendance.punch_in_at>=lower,Attendance.punch_in_at<upper)
     if employee_id:punches=punches.filter_by(user_id=employee_id)
     for p in punches.order_by(Attendance.punch_in_at.desc()).all():
         detail=f'In GPS {p.in_latitude},{p.in_longitude} ({p.in_accuracy:.0f}m)'
         if p.punch_out_at:detail+=f' | Out {local(p.punch_out_at)} GPS {p.out_latitude},{p.out_longitude}'
         rows.append([people.get(p.user_id,''),'ATTENDANCE','', 'PUNCHED_OUT' if p.punch_out_at else 'PUNCH_OUT_PENDING',local(p.punch_in_at),detail])
+        if with_links:rows[-1].append(f'/attendance/{p.id}/share')
+    if with_links:headers.append("Share")
     return headers,rows
 
 @router.get('/activity-reports',response_class=HTMLResponse)
@@ -65,12 +68,12 @@ def activity_report(request:Request,employee_id:int=0,period:str='daily',day:dat
     except PermissionError:return HTMLResponse('Access Denied',403)
     except ValueError as e:return HTMLResponse(escape(str(e)),400)
     with SessionLocal() as db:
-        headers,rows=report_data(db,employee_id,first,last)
+        headers,rows=report_data(db,employee_id,first,last,with_links=True)
         options='<option value="0">All employees</option>'+''.join(f'<option value="{u.id}" {"selected" if employee_id==u.id else ""}>{escape(u.full_name)}</option>' for u in db.query(User).order_by(User.full_name).all())
     params=urlencode(dict(employee_id=employee_id,start=first,end=last,period=period))
     employee=f'<label>Employee<select name="employee_id">{options}</select></label>' if request.session.get('role') in MANAGEMENT else ''
     form=f'<form>{employee}<label>Period<select name="period"><option value="daily" {"selected" if period=="daily" else ""}>Daily</option><option value="monthly" {"selected" if period=="monthly" else ""}>Monthly</option></select></label><label>Daily date<input type="date" name="day" value="{day or business_today()}"></label><label>Month<input type="month" name="month" value="{month or business_today().strftime("%Y-%m")}"></label><button>Show Report</button></form>'
-    table='<div class="table"><table><tr>'+''.join(f'<th>{h}</th>' for h in headers)+'</tr>'+''.join('<tr>'+''.join(f'<td>{escape(str(v))}</td>' for v in r)+'</tr>' for r in rows)+'</table></div>'
+    table='<div class="table"><table><tr>'+''.join(f'<th>{h}</th>' for h in headers)+'</tr>'+''.join('<tr>'+''.join(f'<td>{escape(str(v))}</td>' for v in r[:-1])+f'<td><a href="{r[-1]}">Share</a></td></tr>' for r in rows)+'</table></div>'
     return page('Employee Activity Reports',f'<p>{first} to {last} (India) · {len(rows)} records. Activities show booking/creation date; attendance includes GPS evidence.</p>'+form+f'<a href="/activity-reports/export?{escape(params)}">Download Excel</a>'+share_button('/activity-reports/pdf?'+params)+table+SHARE_SCRIPT)
 
 @router.get('/activity-reports/{format}')
