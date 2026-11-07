@@ -35,7 +35,7 @@ def new_order(request:Request,client_id:int=0):
     with SessionLocal() as db:clients=clients_select(db,client_id)
     lines=''.join(f'<tr data-mrp="{mrp}"><td>{escape(name)}<small>{sku}</small></td><td>₹{mrp}</td><td><input aria-label="Quantity {name}" name="qty_{sku}" type="number" min="0" max="10000" step="1" value="0"></td><td><input aria-label="Discount percent {name}" name="discount_{sku}" type="number" min="0" max="100" step="0.01" value="0"></td><td class="line-total">₹0.00</td></tr>' for sku,name,mrp in CATALOG)
     script='''<script>const f=document.querySelector('#order-form');f.addEventListener('input',()=>{let total=0;f.querySelectorAll('tr[data-mrp]').forEach(r=>{const inputs=r.querySelectorAll('input');const qty=Number(inputs[0].value);const discount=Number(inputs[1].value);const value=Math.round(Number(r.dataset.mrp)*qty*(100-discount))/100;total+=value;r.querySelector('.line-total').textContent='₹'+value.toFixed(2);});document.querySelector('#order-total').textContent='₹'+total.toFixed(2);});</script>'''
-    return page('Book Order',f'<form id="order-form" method="post" action="/orders">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients,"/orders/new")}<div class="full table"><table><tr><th>SKU</th><th>MRP</th><th>Qty</th><th>Discount %</th><th>Amount</th></tr>{lines}</table></div><h2 class="full">Total: <span id="order-total">₹0.00</span></h2><label>Payment terms<input name="payment_terms" maxlength="200"></label><label>Delivery address<textarea name="delivery_address" maxlength="2000"></textarea></label><label>Notes<textarea name="notes" maxlength="4000"></textarea></label><button>Save Order &amp; Continue to WhatsApp</button><p>Order booking is not an invoice or payment receipt. Amounts use MRP less your entered discount; existing billing remains separate.</p></form>'+script)
+    return page('Book Order',f'<form id="order-form" method="post" action="/orders">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients,"/orders/new")}<div class="full table"><table><tr><th>SKU</th><th>MRP</th><th>Qty</th><th>Discount %</th><th>Amount</th></tr>{lines}</table></div><h2 class="full">Total: <span id="order-total">₹0.00</span></h2><label>Payment terms<input name="payment_terms" maxlength="200"></label><label>Delivery address<textarea name="delivery_address" maxlength="2000"></textarea></label><label>Notes<textarea name="notes" maxlength="4000"></textarea></label><button>Save Order &amp; Share</button><p>Order booking is not an invoice or payment receipt. Amounts use MRP less your entered discount; existing billing remains separate.</p></form>'+script)
 
 @router.post('/orders')
 async def book_order(request:Request):
@@ -76,9 +76,6 @@ def detail(order_id:int,request:Request):
         o,a,c,lines=found
         rows=''.join(f'<tr><td>{escape(l.name)}</td><td>{l.quantity}</td><td>₹{l.mrp}</td><td>{l.discount_percent}%</td><td>₹{l.amount}</td></tr>' for l in lines)
         content=f'<h2>{escape(o.order_number or str(o.id))}</h2><p>{escape(c.business_name)} · {escape(o.status)}</p><div class="table"><table><tr><th>Product</th><th>Qty</th><th>MRP</th><th>Discount</th><th>Amount</th></tr>{rows}</table></div><h2>Total ₹{o.total_amount}</h2>'+share_button(f'/orders/{order_id}/pdf',f'ESONE_order_{order_id}.pdf')
-        content+=f'<form method="post" action="/orders/{order_id}/send">{hidden(request)}<button>Send Order via connected WhatsApp</button><p>Sends the order confirmation to the salon’s registered WhatsApp number when the approved template is configured.</p></form>'
-        logs=db.query(CommunicationLog).filter_by(activity_id=a.id,purpose='ORDER_CONFIRMATION').order_by(CommunicationLog.id.desc()).limit(5).all()
-        content+=''.join(f'<p>WhatsApp: {escape(l.status)} · {escape(l.failure_reason or "")}</p>' for l in logs)
     return page('Order Details',content+SHARE_SCRIPT)
 
 @router.get('/orders/{order_id}/pdf')
@@ -115,3 +112,4 @@ def send_order(order_id:int,request:Request,csrf:str=Form('')):
         except DeliveryError as e:log.status='FAILED';log.failure_reason=str(e)
         audit(db,request,'SalesOrder',order_id,'ORDER_WHATSAPP',new=log.status)
     return RedirectResponse(f'/orders/{order_id}',303)
+
