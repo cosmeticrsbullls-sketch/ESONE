@@ -44,7 +44,7 @@ def action_key(label,href=''):
         (('save',),'save'),(('edit','reschedule'),'edit'),
         (('search','find','filter','apply'),'search'),
         (('complete','confirm','verify','mark','approve'),'check'),
-        (('back','return','previous'),'back'),(('import','upload'),'add'),
+        (('import','upload'),'add'),(('back','return','previous'),'back'),
         (('notification','message'),'bell'),(('report','history','my visits','my orders'),'reports'),
         (('order',),'order'),(('demo','calendar'),'demo'),
         (('collection',),'collection'),(('call',),'call'),
