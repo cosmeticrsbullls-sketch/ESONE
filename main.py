@@ -268,6 +268,8 @@ def command_center(request: Request):
              ("demos", "Demo Bookings", "Schedule treatments and track conversion outcomes.", "/demos"),
              ("reports", "Reports & Follow-ups", "Courtesy queues, PTPs and filtered Excel exports.", "/operations")]
     cards += [("clients", "Employee Master", "Basic employee details and profiles.", "/employees"),("reports", "Employee Activity Reports", "Daily/monthly activities and PDF WhatsApp sharing.", "/activity-reports"),("reports", "Notifications / Messages", "Today’s activity, new demos/orders and pending reminders.", "/notifications"),("reports", "Orders", "Order bookings and WhatsApp confirmation.", "/orders"),("visits", "Attendance", "GPS punch in/out and map evidence.", "/attendance")]
+    if role in {"SUPER_ADMIN", "MANAGEMENT", "OFFICE"}:
+        cards.insert(0,("visits", "Live Activity", "Team activity, visit counters and last known GPS locations.", "/live-activity"))
     from modules.notifications import inbox_card
     summary += inbox_card(request)
     if role in {"SUPER_ADMIN", "MANAGEMENT"}: cards.append(("clients", "Staff Password Reset", "Reset an approved employee password with an audit record.", "/command-center/passwords"))
@@ -1016,6 +1018,8 @@ def visit_detail(activity_id:int, request:Request):
         otp_block=''
         if otp and a.status=="IN_PROGRESS" and activity_otp_required():
             otp_block=f'''<form method="post" action="/visits/{activity_id}/verify-end-otp">{csrf_field}<h3>Customer End OTP</h3><input name="otp" inputmode="numeric" maxlength="6" required><button>VERIFY & COMPLETE</button></form>'''
+        from modules.live_activity import share_button, SHARE_SCRIPT
+        end_block += share_button(f"/activities/{activity_id}/pdf",f"ESONE_visit_{activity_id}.pdf")+SHARE_SCRIPT
         from modules.enhancements import map_link
         maps = '<p>' + ' · '.join(map_link(label,lat,lon) for label,lat,lon in [('Salon on Google Maps',c.latitude,c.longitude),('Check-in on Google Maps',v.check_in_latitude,v.check_in_longitude),('Check-out on Google Maps',v.check_out_latitude,v.check_out_longitude)] if lat is not None and lon is not None) + '</p>'
         if request.session.get('role') in {'SUPER_ADMIN','MANAGEMENT','OFFICE'} and a.status == 'IN_PROGRESS':
@@ -1264,3 +1268,6 @@ app.include_router(activity_report_router)
 from modules.notifications import router as notifications_router
 app.include_router(notifications_router)
 
+
+from modules.live_activity import router as live_activity_router
+app.include_router(live_activity_router)

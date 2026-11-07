@@ -223,7 +223,8 @@ def demo_detail(demo_id:int,request:Request):
         if a.status in {'BOOKED','IN_PROGRESS'}:
             actions=['START','CANCEL'] if a.status=='BOOKED' else ['COMPLETE']
             content+=f'''<form method="post">{hidden(request)}{choices("action", [(v,{"START":"Start Demo","CANCEL":"Cancel Booking","COMPLETE":"Complete Demo"}[v]) for v in actions], actions[0], "Demo action")}{choices("result", [("CONVERTED","Converted"),("NOT_CONVERTED","Not converted"),("FOLLOW_UP","Follow-up needed")], "CONVERTED", "Conversion result (completion only)")}<label>Notes / reason <textarea name="notes" maxlength="4000" required></textarea></label><label data-when="followup">Follow-up date <input name="followup" type="date"></label><button>Save</button></form>'''
-    return page('Demo Details',content)
+    from modules.pdf_reports import share_button, SHARE_SCRIPT
+    return page('Demo Details',content+share_button(f'/activities/{a.id}/pdf',f'ESONE_demo_{demo_id}.pdf')+SHARE_SCRIPT)
 
 @router.post('/demos/{demo_id}')
 def demo_transition(demo_id:int,request:Request,action:str=Form(...),result:str=Form('PENDING'),notes:str=Form(''),followup:str=Form(''),csrf:str=Form('')):
