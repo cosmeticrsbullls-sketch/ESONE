@@ -42,7 +42,36 @@ def pdf_response(title,headers,rows,filename='ESONE_report.pdf',summary=''):
     return Response(pdf_bytes(title,headers,rows,summary),media_type='application/pdf',headers={'Content-Disposition':f'attachment; filename="{filename}"','Cache-Control':'no-store'})
 
 def share_button(url,filename='ESONE_report.pdf'):
-    return f'<div class="pdf-share" data-pdf="{escape(url,quote=True)}" data-filename="{escape(filename,quote=True)}"><button type="button" class="share-pdf">Share</button> <a class="secondary" href="{escape(url,quote=True)}">Download PDF</a><p role="status">Prepare the PDF, then choose an available app from your device share menu.</p></div>'
+    return f'<div class="pdf-share" data-pdf="{escape(url,quote=True)}" data-filename="{escape(filename,quote=True)}"><button type="button" class="share-pdf">Share</button> <a class="secondary" href="{escape(url,quote=True)}">Download PDF</a><progress hidden aria-label="Preparing PDF" style="width:100%;max-width:280px"></progress><p role="status">Tap Share to prepare your PDF and open the device share menu.</p></div>'
 
-SHARE_SCRIPT='''<script>document.querySelectorAll('.pdf-share').forEach(box=>{const b=box.querySelector('button');const status=box.querySelector('[role=status]');let file; b.addEventListener('click',async()=>{try{if(!file){b.disabled=true;status.textContent='Preparing PDF…';const r=await fetch(box.dataset.pdf,{credentials:'same-origin'});if(!r.ok||!(r.headers.get('content-type')||'').includes('application/pdf'))throw Error();file=new File([await r.blob()],box.dataset.filename,{type:'application/pdf'});b.textContent='Share';status.textContent='PDF ready. Tap Share again to choose an app.';return;}if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file]});status.textContent='Shared with your selected app. Delivery is handled by that app.';}else{const a=document.createElement('a');const u=URL.createObjectURL(file);a.href=u;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),60000);status.textContent='PDF downloaded. Share it using an app on your device.';}}catch(e){if(e.name==='AbortError')status.textContent='Sharing cancelled. Your PDF is ready to share again.';else status.textContent='Unable to share. Use Download PDF and share the saved file.';}finally{b.disabled=false;}});});</script>'''
-
+SHARE_SCRIPT='''<script>document.querySelectorAll('.pdf-share').forEach(box=>{
+ const b=box.querySelector('button'),status=box.querySelector('[role=status]'),progress=box.querySelector('progress');
+ let file,busy=false;
+ b.addEventListener('click',async()=>{
+  if(busy)return;
+  busy=true;b.disabled=true;box.setAttribute('aria-busy','true');
+  try{
+   if(!file){
+    b.textContent='Preparing PDF…';status.textContent='Preparing PDF…';progress.hidden=false;
+    const r=await fetch(box.dataset.pdf,{credentials:'same-origin'});
+    if(!r.ok||!(r.headers.get('content-type')||'').includes('application/pdf'))throw Error();
+    file=new File([await r.blob()],box.dataset.filename,{type:'application/pdf'});
+   }
+   progress.hidden=true;b.textContent='Opening share…';
+   if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
+    await navigator.share({files:[file]});
+    status.textContent='Shared with your selected app. Delivery is handled by that app.';
+   }else{
+    const a=document.createElement('a'),u=URL.createObjectURL(file);
+    a.href=u;a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(u),60000);
+    status.textContent='PDF downloaded. Share it using an app on your device.';
+   }
+  }catch(e){
+   if(e.name==='AbortError')status.textContent='Sharing cancelled. Your PDF is ready to share again.';
+   else if(file&&e.name==='NotAllowedError')status.textContent='PDF ready — Tap to share. If blocked again, use Download PDF.';
+   else status.textContent='Unable to share. Try again or use Download PDF and share the saved file.';
+  }finally{
+   progress.hidden=true;busy=false;b.disabled=false;b.textContent='Share';box.removeAttribute('aria-busy');
+  }
+ });
+});</script>'''
