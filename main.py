@@ -1,6 +1,6 @@
 import os
 from html import escape
-from secrets import token_urlsafe
+from secrets import compare_digest, token_urlsafe
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi import FastAPI, Form, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -293,6 +293,7 @@ def users_page(request: Request):
     if request.session.get("role") != "SUPER_ADMIN":
         return HTMLResponse("Access Denied", status_code=403)
 
+    from modules.workflows import hidden
     users = get_all_users()
 
     rows = ""
@@ -431,6 +432,7 @@ def users_page(request: Request):
                 <h2>Create ESONE User</h2>
 
                 <form method="post" action="/users/create">
+                    {hidden(request)}
 
                     <label>Employee Name</label>
                     <input
@@ -506,7 +508,8 @@ def create_es1_user(
     full_name: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
-    role: str = Form(...)
+    role: str = Form(...),
+    csrf: str = Form("")
 ):
 
     if not request.session.get("user_id"):
@@ -514,6 +517,10 @@ def create_es1_user(
 
     if request.session.get("role") != "SUPER_ADMIN":
         return HTMLResponse("Access Denied", status_code=403)
+
+    expected_csrf = request.session.get('workflow_csrf', '')
+    if not csrf or not compare_digest(csrf.encode('utf-8'), expected_csrf.encode('utf-8')):
+        return HTMLResponse('Please reload the form and try again.', status_code=403)
 
     success, message = create_user(
         full_name,
