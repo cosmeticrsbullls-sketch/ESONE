@@ -17,6 +17,26 @@ class EnhancementTests(unittest.TestCase):
         response=self.client.get(path)
         self.assertEqual(response.status_code,200)
         return re.search(r'name="csrf" value="([^"]+)"',response.text)[1]
+    def test_header_notifications_follow_explicit_read_action(self):
+        self.login('a')
+        response=self.client.get('/workspace')
+        self.assertIn('home-quick-actions',response.text)
+        self.assertIn('class="header-notifications"',response.text)
+        self.assertNotIn('class="secondary notification-badge"',response.text)
+        before=self.client.get('/notifications/count')
+        self.assertEqual(before.headers['cache-control'],'no-store')
+        self.assertGreater(before.json()['unread'],0)
+        self.client.get('/notifications')
+        self.assertEqual(self.client.get('/notifications/count').json()['unread'],before.json()['unread'])
+        self.assertEqual(self.client.post('/notifications',data={'csrf':'wrong'}).status_code,403)
+        self.client.post('/notifications',data={'csrf':self.csrf})
+        self.assertEqual(self.client.get('/notifications/count').json()['unread'],0)
+        with SessionLocal.begin() as db:
+            db.add(Activity(client_id=1,activity_type='FIELD_VISIT',status='CREATED',assigned_user_id=2,created_by=2,created_at=now(),updated_at=now()))
+        self.assertGreater(self.client.get('/notifications/count').json()['unread'],0)
+        self.client.get('/logout')
+        self.assertNotIn('class="header-notifications"',self.client.get('/login').text)
+
     def test_workspace_and_management_closure_preserve_evidence(self):
         self.login()
         self.assertIn('Sales',self.client.get('/workspace').text)
