@@ -115,6 +115,14 @@ def xlsx(headers, rows, kind):
     sheet.freeze_panes="A2"; sheet.auto_filter.ref=sheet.dimensions
     for column in sheet.columns:
         sheet.column_dimensions[column[0].column_letter].width=min(45,max(14,max(len(str(c.value or "")) for c in column)+2))
+    from pathlib import Path
+    from openpyxl.drawing.image import Image
+    from openpyxl.utils import get_column_letter
+    logo=Path(__file__).resolve().parent.parent / 'assets/earthshine-logo.png'
+    if logo.exists():
+        image=Image(str(logo));ratio=image.width/image.height
+        image.width=min(160,85*ratio);image.height=min(85,160/ratio)
+        sheet.add_image(image,get_column_letter(len(headers)+2)+'1')
     output=BytesIO(); book.save(output)
     return Response(output.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition":f'attachment; filename="ESONE_{kind}.xlsx"'})
@@ -161,7 +169,7 @@ def timeline(client_id:int,request:Request):
         client=db.get(Client,client_id)
         if not client:return HTMLResponse("Client not found",404)
         records=db.query(Activity).filter(Activity.client_id==client_id).order_by(Activity.created_at.desc(),Activity.id.desc()).all()
-        items="".join(f'<li><strong>{escape(a.activity_type)} — {escape(a.status or "")}</strong> · {a.created_at}<p>{escape(a.title or "")} {escape(a.notes or "")}</p></li>' for a in records)
+        items="".join(f'<li><strong>{escape(a.activity_type)} — {escape(a.status or "")}</strong> · {a.created_at}<p>{escape(a.title or "")} {escape(a.notes or "")}</p><a href="/activities/{a.id}/share">Share activity</a></li>' for a in records)
         return f'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE Timeline</title></head><body style="font-family:Arial;padding:24px"><a href="/clients">← Clients</a><h1>{escape(client.business_name)} — Activity Timeline</h1><ol>{items or "<li>No recorded activities.</li>"}</ol></body></html>'
 
 
@@ -174,3 +182,4 @@ def report_pdf(request:Request,kind:str='courtesy',q:str='',start:date|None=None
         except ValueError as error:return HTMLResponse(escape(str(error)),400)
     from modules.pdf_reports import pdf_response
     return pdf_response(kind.title(),headers,rows,'ESONE_'+kind+'.pdf',f'From {start or "all"} to {end or "all"} | Search: {q}')
+
