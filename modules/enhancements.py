@@ -31,7 +31,7 @@ def section(request: Request, section: str):
       'collection':[('Start collection visit','/field/intake?visit_type=COLLECTION'),('My visits','/visits')]+([('Record collection call','/calls/new'),('Collection reports','/operations'),('Import bills and previous collections','/imports')] if management else []),
       'demo':[('Book Demo','/demos/new'),('Demo calendar','/demos')]+([('Demo reports','/operations?kind=demos')] if management else [])}
     if section not in options: return HTMLResponse('Not found',404)
-    links=''.join(f'<p><a class="secondary" href="{url}">{label}</a></p>' for label,url in options[section])
+    links='<div class="workspace-action-grid" aria-label="'+section.title()+' actions">'+''.join(f'<a class="secondary" href="{url}">{label}</a>' for label,url in options[section])+'</div>'
     if section=='demo' and not management:
         from database.models import DemoBooking, Client
         with SessionLocal() as db:
