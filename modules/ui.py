@@ -80,7 +80,7 @@ def navigation(path, name, role):
 
 def enhance(document, path, name='', role='', signed_in=False):
     if '</head>' not in document or '<body' not in document:return document
-    document=document.replace('</head>','<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/assets/esone.css?v=5"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png"><meta name="theme-color" content="#f5f6f8"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="ESONE"><meta name="apple-mobile-web-app-status-bar-style" content="default"></head>',1)
+    document=document.replace('</head>','<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/assets/esone.css?v=6"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png"><meta name="theme-color" content="#f5f6f8"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="ESONE"><meta name="apple-mobile-web-app-status-bar-style" content="default"></head>',1)
     start=document.index('<body');end=document.index('>',start)
     is_login=path in {'/','/login','/login/'} and not signed_in
     cls='esone-login' if is_login else 'esone-app'
@@ -89,7 +89,7 @@ def enhance(document, path, name='', role='', signed_in=False):
     if is_login:document=document.replace('<div class="login-box">','<div class="login-box">'+brand_mark(),1)
     if is_login:document=document.replace('</form>','</form><p><a href="/forgot-password">Forgot password?</a></p><div class="login-foot">Earthshine Professional · Business workspace</div>',1)
     if signed_in:
-        document=document.replace('</body>', NOTIFICATION_SCRIPT+'</body>')
+        document=document.replace('</body>', NOTIFICATION_SCRIPT+ACTION_FEEDBACK_SCRIPT+'</body>')
         document=document.replace('</body>', '<script>document.querySelectorAll("table").forEach(t=>{const labels=Array.from(t.querySelectorAll("thead th, tr:first-child th")).map(x=>x.textContent.trim());t.querySelectorAll("tr").forEach(r=>r.querySelectorAll("td").forEach((d,i)=>d.dataset.label=labels[i]||""));});</script></body>')
     return document
 
@@ -105,4 +105,49 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background-im
 """
 CSS += """
 .esone-app main{background-image:linear-gradient(#ffffffed,#ffffffed),url('/assets/icon-192.png')!important;background-size:auto,150px 150px!important;background-repeat:repeat!important}.esone-app main.dashboard{background-color:transparent!important}.pdf-share{background:#ffffffcc;border-radius:12px;padding:14px}.workflow details{grid-column:1/-1}.workflow .full{grid-column:1/-1!important}
+"""
+
+# Shared action feedback. Navigation and submission states clear on browser Back.
+ACTION_FEEDBACK_SCRIPT = r'''<script>(()=>{
+const pendingForms=new Map(), pendingLinks=new Set();
+function reset(){
+ pendingLinks.forEach(link=>{link.classList.remove('is-navigating');link.removeAttribute('aria-busy');});pendingLinks.clear();
+ pendingForms.forEach((state,form)=>{form.removeAttribute('aria-busy');if(state.button){state.button.innerHTML=state.html;state.button.removeAttribute('aria-disabled');state.button.classList.remove('is-submitting');}});pendingForms.clear();
+}
+document.addEventListener('click',event=>{
+ const link=event.target.closest('a[href]');
+ if(!link||event.defaultPrevented||event.button!==0||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey||link.hasAttribute('download')||(link.target&&link.target!=='_self'))return;
+ const url=new URL(link.href,location.href);
+ if(url.origin!==location.origin||url.pathname===location.pathname&&url.search===location.search)return;
+ if(!link.matches('.primary,.secondary,.workspace-buttons a,.esone-links a,.header-notifications'))return;
+ queueMicrotask(()=>{if(!event.defaultPrevented){link.classList.add('is-navigating');link.setAttribute('aria-busy','true');pendingLinks.add(link);}});
+});
+document.addEventListener('submit',event=>{
+ const form=event.target;if(pendingForms.has(form)){event.preventDefault();return;}
+ if(event.defaultPrevented)return;
+ const button=event.submitter;
+ // Run after form-specific validation/GPS handlers; keep submitter name/value intact.
+ queueMicrotask(()=>{if(event.defaultPrevented)return;
+ const state={button,html:button?button.innerHTML:''};pendingForms.set(form,state);form.setAttribute('aria-busy','true');
+ if(button){if(button.tagName==='BUTTON')button.textContent='Processing…';button.setAttribute('aria-disabled','true');button.classList.add('is-submitting');}
+ });
+});
+window.addEventListener('pageshow',reset);
+})();</script>'''
+
+CSS += """
+.workspace-action-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:1fr;gap:16px;margin-top:20px}
+.esone-app .workspace-action-grid a.secondary{display:flex;align-items:center;justify-content:center;width:100%;min-height:96px!important;height:100%;box-sizing:border-box;text-align:center;white-space:normal;line-height:1.4;margin:0!important;background:#fff8e8!important;color:#8e651c!important;border:1px solid #d7b666!important;border-radius:14px!important;font-weight:600}
+.esone-app :is(button,input[type=submit],a.primary,a.secondary,.workspace-buttons a,.esone-links a,.header-notifications):not(#team-map *){transition:background-color .12s,border-color .12s,box-shadow .12s,transform .12s}
+.esone-app :is(a.secondary,.workspace-buttons a):hover{background:#f6e9c8!important;border-color:#b58b39!important;color:#795415!important}
+.esone-app :is(button,input[type=submit],a.primary,a.secondary,.workspace-buttons a,.esone-links a,.header-notifications):not(:disabled):not(#team-map *):active,
+.esone-app :is(.is-navigating,.is-submitting){background:#8e651c!important;color:#fff!important;border-color:#795415!important;box-shadow:inset 0 3px 6px #0003!important;transform:translateY(2px)}
+.esone-app :is(button,input[type=submit],a.primary,a.secondary,.workspace-buttons a,.esone-links a,.header-notifications):not(#team-map *):focus-visible{outline:3px solid #b58b39!important;outline-offset:3px}
+.esone-app :is(button[aria-pressed=true],a[aria-pressed=true]){background:#8e651c!important;color:#fff!important;border-color:#795415!important;box-shadow:inset 0 0 0 2px #f3d995!important}
+.esone-app :is(button:disabled,input[type=submit]:disabled){opacity:.55;cursor:not-allowed}
+.esone-app :is(.is-navigating,.is-submitting){cursor:wait;pointer-events:none}
+.esone-app .is-navigating::after{content:' …';display:inline-block;margin-left:6px;font-weight:700}
+@media(max-width:900px){.workspace-action-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:480px){.workspace-action-grid{grid-template-columns:1fr;gap:12px}.esone-app .workspace-action-grid a.secondary{min-height:76px!important}}
+@media(prefers-reduced-motion:reduce){.esone-app :is(button,a,input){transition:none!important}}
 """
