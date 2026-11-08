@@ -1,3 +1,4 @@
+from modules.duty import require_duty, on_duty, notice, active_field_work
 """Sales order capture, immutable line-price snapshots and explicit WhatsApp actions."""
 from html import escape
 from secrets import token_urlsafe
@@ -49,6 +50,8 @@ async def book_order(request:Request):
         if not 16<=len(submission)<=80 or len(terms)>200 or len(address)>2000 or len(notes)>4000:raise ValueError('Invalid order details')
     except ValueError as e:return HTMLResponse(escape(str(e)),400)
     with SessionLocal.begin() as db:
+        denied=require_duty(db, request, office_work=True)
+        if denied is not None:return denied
         db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
         prior=db.query(AuditLog).filter_by(user_id=request.session['user_id'],action='ORDER_BOOKED',new_value=submission).first()
         if prior:return RedirectResponse(f'/orders/{prior.entity_id}',303)
