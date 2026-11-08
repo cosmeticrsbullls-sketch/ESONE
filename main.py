@@ -270,6 +270,7 @@ def command_center(request: Request):
              ("reports", "Reports & Follow-ups", "Courtesy queues, PTPs and filtered Excel exports.", "/operations")]
     cards += [("clients", "Employee Master", "Basic employee details and profiles.", "/employees"),("reports", "Employee Activity Reports", "Daily/monthly activities and PDF WhatsApp sharing.", "/activity-reports"),("reports", "Notifications / Messages", "Today’s activity, new demos/orders and pending reminders.", "/notifications"),("reports", "Orders", "Order bookings and WhatsApp confirmation.", "/orders"),("visits", "Attendance", "GPS punch in/out and map evidence.", "/attendance")]
     if role in {"SUPER_ADMIN", "MANAGEMENT", "OFFICE"}:
+        cards.insert(0,("reports", "Generate Sales Bill", "GST: Shivam Export · Non-GST: Shivam Cosmetics. Create from sales order or directly.", "/billing"))
         cards.insert(0,("visits", "Live Activity", "Team activity, visit counters and last known GPS locations.", "/live-activity"))
     from modules.notifications import inbox_card
     summary += inbox_card(request)
@@ -1294,3 +1295,7 @@ app.include_router(notifications_router)
 
 from modules.live_activity import router as live_activity_router
 app.include_router(live_activity_router)
+
+
+from modules.billing import router as billing_router
+app.include_router(billing_router)
