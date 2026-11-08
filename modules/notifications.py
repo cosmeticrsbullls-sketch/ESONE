@@ -10,6 +10,7 @@ from database.models import Activity,User,Client,Attendance,PromiseToPay,Notific
 from modules.team import staff_access,MANAGEMENT
 from modules.workflows import page,hidden,now
 from modules.operations import business_today,queues
+from modules.button_icons import svg as action_svg
 router=APIRouter()
 
 def inbox(db,request):
@@ -57,8 +58,16 @@ def notifications(request:Request):
     if denied is not None:return denied
     with SessionLocal() as db:
         items=inbox(db,request);read=db.get(NotificationRead,request.session['user_id']);read_at=read.read_at if read else datetime.min
-    content=f'<p>{len(items)} activity and pending reminders. Business date {business_today()} (India).</p><form method="post">{hidden(request)}<button>Mark current updates read</button></form>'
-    content+=''.join(f'<article class="card"><strong>{"New · " if stamp>read_at else ""}{escape(title)}</strong><p><a href="{url}">Open details</a></p></article>' for title,url,stamp in items) or '<p>No activities or pending reminders.</p>'
+    content='''<style>
+.notification-row{display:flex;align-items:center;gap:16px;padding:16px 20px!important}
+.notification-row strong{flex:1;min-width:0;overflow-wrap:anywhere}
+.notification-row .notification-open{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex:0 0 44px;border-radius:10px;background:#fff8e8}
+.notification-open svg{width:26px;height:26px}
+.notification-open:hover{background:#f6e9c8}
+.notification-open:active{background:#e8d29d;transform:translateY(1px)}
+</style>'''
+    content+=f'<p>{len(items)} activity and pending reminders. Business date {business_today()} (India).</p><form method="post">{hidden(request)}<button>Mark current updates read</button></form>'
+    content+=''.join(f'<article class="card notification-row"><strong>{"New · " if stamp>read_at else ""}{escape(title)}</strong><a class="notification-open" href="{escape(url,quote=True)}" aria-label="Open details: {escape(title,quote=True)}" title="Open details">{action_svg("open")}</a></article>' for title,url,stamp in items) or '<p>No activities or pending reminders.</p>'
     return page('Notifications / Messages',content)
 
 @router.post('/notifications')
