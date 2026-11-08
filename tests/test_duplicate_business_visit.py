@@ -7,8 +7,12 @@ from database.models import Activity,Client,Visit
 class DuplicateBusinessVisitTests(unittest.TestCase):
     setUpClass=classmethod(OperationsTests.setUpClass.__func__)
     setUp=OperationsTests.setUp
+    punch_in_for_test=OperationsTests.punch_in_for_test
+    _base_login=OperationsTests.login
     tearDown=OperationsTests.tearDown
-    login=OperationsTests.login
+    def login(self, who='manager'):
+        self.punch_in_for_test(1,2,3)
+        self._base_login(who)
 
     def data(self):
         self.login('a')
