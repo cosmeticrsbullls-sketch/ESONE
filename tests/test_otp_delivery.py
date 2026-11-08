@@ -15,8 +15,12 @@ CONFIG={'ESONE_ENV':'production','WHATSAPP_ACCESS_TOKEN':'unit-test-token','WHAT
 class OtpTests(unittest.TestCase):
     setUpClass=classmethod(OperationsTests.setUpClass.__func__)
     setUp=OperationsTests.setUp
+    punch_in_for_test=OperationsTests.punch_in_for_test
+    _base_login=OperationsTests.login
     tearDown=OperationsTests.tearDown
-    login=OperationsTests.login
+    def login(self, who='manager'):
+        self.punch_in_for_test(1,2,3)
+        self._base_login(who)
 
     def begin_visit(self):
         self.login('a')

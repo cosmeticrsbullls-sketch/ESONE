@@ -1,3 +1,4 @@
+from modules.duty import require_duty, on_duty, notice, active_field_work
 """Employee profiles and GPS attendance, without editing system evidence."""
 from datetime import date
 from html import escape
@@ -36,9 +37,12 @@ def attendance(request:Request,employee_id:int=0):
         opened=db.query(Attendance).filter_by(user_id=request.session['user_id'],punch_out_at=None).first()
         options='<option value="0">All employees</option>'+''.join(f'<option value="{uid}" {"selected" if uid==employee_id else ""}>{escape(name)}</option>' for uid,name in people.items())
         filter_form=f'<form><label>Employee<select name="employee_id">{options}</select></label><button>Show Attendance</button></form>' if manager else ''
+        blocked=bool(opened and active_field_work(db,request.session['user_id']))
+        blocked_message='<p role="status">Complete your active Visit or Demo before Punch Out.</p>' if blocked else ''
+        disabled=' disabled aria-disabled="true"' if blocked else ''
         action='OUT' if opened else 'IN'
         rows=''.join(f'<tr><td>{escape(people.get(r.user_id,''))}</td><td>{r.punch_in_at} UTC</td><td>{gps_link(r.in_latitude,r.in_longitude)} · {r.in_accuracy:.0f} m</td><td>{str(r.punch_out_at)+" UTC" if r.punch_out_at else "Pending punch out"}</td><td>{gps_link(r.out_latitude,r.out_longitude)}</td><td><a href="/attendance/{r.id}/share">Share</a></td></tr>' for r in records)
-    return page('Attendance',filter_form+f'<p>Actual punch times and GPS are recorded automatically.</p><form method="post" data-gps-form>{hidden(request)}<input type="hidden" name="action" value="{action}"><input type="hidden" name="latitude"><input type="hidden" name="longitude"><input type="hidden" name="accuracy"><button>Punch {action.title()}</button><p role="status"></p></form><div class="table"><table><tr><th>Employee</th><th>Punch in</th><th>In GPS</th><th>Punch out</th><th>Out GPS</th><th>Share</th></tr>{rows}</table></div>'+GPS_SCRIPT)
+    return page('Attendance',filter_form+blocked_message+f'<p>Actual punch times and GPS are recorded automatically.</p><form method="post" data-gps-form>{hidden(request)}<input type="hidden" name="action" value="{action}"><input type="hidden" name="latitude"><input type="hidden" name="longitude"><input type="hidden" name="accuracy"><button{disabled}>Punch {action.title()}</button><p role="status"></p></form><div class="table"><table><tr><th>Employee</th><th>Punch in</th><th>In GPS</th><th>Punch out</th><th>Out GPS</th><th>Share</th></tr>{rows}</table></div>'+GPS_SCRIPT)
 
 @router.post('/attendance')
 def punch(request:Request,action:str=Form(...),latitude:float=Form(...),longitude:float=Form(...),accuracy:float=Form(...),csrf:str=Form('')):
@@ -53,6 +57,8 @@ def punch(request:Request,action:str=Form(...),latitude:float=Form(...),longitud
             record=Attendance(user_id=request.session['user_id'],punch_in_at=now(),in_latitude=latitude,in_longitude=longitude,in_accuracy=accuracy);db.add(record);db.flush()
         else:
             if not opened:return HTMLResponse('Punch in before punching out.',409)
+            if active_field_work(db, request.session['user_id']):
+                return HTMLResponse('<p>Complete your active Visit or Demo before Punch Out.</p><a href="/visits">My visits</a> · <a href="/demos">My demos</a>',409)
             record=opened;record.punch_out_at=now();record.out_latitude=latitude;record.out_longitude=longitude;record.out_accuracy=accuracy
         audit(db,request,'Attendance',record.id,'PUNCH_'+action)
     return RedirectResponse('/workspace',303)
@@ -120,6 +126,8 @@ async def salon_create(request:Request):
     from database.models import Client
     with SessionLocal.begin() as db:
         db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
+        denied=require_duty(db, request, office_work=True)
+        if denied is not None:return denied
         # Reuse an exact salon/phone match on retry; business contact changes use edit approval.
         c=db.query(Client).filter_by(business_name=values['business_name'],phone=values['phone']).first()
         if not c:

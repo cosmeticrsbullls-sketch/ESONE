@@ -10,6 +10,8 @@ from modules.operations import business_today
 class WorkflowTests(unittest.TestCase):
     setUpClass = classmethod(OperationsTests.setUpClass.__func__)
     setUp = OperationsTests.setUp
+    punch_in_for_test = OperationsTests.punch_in_for_test
+    _base_login = OperationsTests.login
     tearDown = OperationsTests.tearDown
     login = OperationsTests.login
     workbook = OperationsTests.workbook
@@ -86,6 +88,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.post('/ptps/2',data={**data,'outcome':'PAID'}).status_code,400)
 
     def test_demo_booking_start_complete_and_timestamp_replay(self):
+        self.punch_in_for_test(1,2)
         self.login();data=self.booking()
         response=self.client.post('/demos',data=data,follow_redirects=False)
         self.assertEqual(response.status_code,303);url=response.headers['location']

@@ -47,6 +47,14 @@ class OperationsTests(unittest.TestCase):
     def tearDown(self):
         self.client.close();Base.metadata.drop_all(self.engine)
 
+    def punch_in_for_test(self, *ids):
+        from database.models import Attendance
+        from modules.workflows import now
+        with SessionLocal.begin() as db:
+            for uid in ids or (2,):
+                if not db.query(Attendance).filter_by(user_id=uid,punch_out_at=None).first():
+                    db.add(Attendance(user_id=uid,punch_in_at=now(),in_latitude=23,in_longitude=72,in_accuracy=12))
+
     def login(self,who='manager'):
         email={'manager':'manager@example.test','a':'a@example.test','b':'b@example.test'}[who]
         response=self.client.post('/login',data={'email':email,'password':'Test-only-password-123'},follow_redirects=False)
@@ -103,6 +111,7 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(self.client.get('/clients/999/timeline').status_code,404)
 
     def test_other_employee_cannot_view_or_mutate_visit(self):
+        self.punch_in_for_test(2,3)
         self.login('b')
         self.assertEqual(self.client.get('/visits/6').status_code,403)
         for suffix,data in [('start',{'latitude':23,'longitude':72}),('request-end-otp',{'notes':'x'}),('verify-end-otp',{'otp':'123456'})]:
@@ -112,6 +121,7 @@ class OperationsTests(unittest.TestCase):
             self.assertIsNone(db.query(Visit).filter_by(activity_id=6).one().check_in_at)
 
     def test_valid_gps_checkin_and_immutable_timestamp(self):
+        self.punch_in_for_test(2,3)
         self.login('a');data={'latitude':23,'longitude':72}
         self.assertEqual(self.client.post('/visits/6/start',data=data).status_code,200)
         with SessionLocal() as db:
@@ -124,6 +134,7 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(self.client.get('/visits').status_code,200)
 
     def test_bad_gps_and_missing_visits_do_not_write(self):
+        self.punch_in_for_test(2,3)
         self.login('a')
         for lat,lon in [(100,72),(23,200),('nan',72),('inf',72)]:
             self.assertEqual(self.client.post('/visits/6/start',data={'latitude':lat,'longitude':lon}).status_code,400)
@@ -134,6 +145,7 @@ class OperationsTests(unittest.TestCase):
         with SessionLocal() as db:self.assertEqual(db.get(Activity,6).status,'CREATED')
 
     def test_gps_radius_enforced(self):
+        self.punch_in_for_test(2,3)
         self.login('a')
         with SessionLocal() as db:
             c=db.get(Client,1);c.latitude=23;c.longitude=72;db.commit()
@@ -141,6 +153,7 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(self.client.post('/visits/6/start',data={'latitude':23.001,'longitude':72}).status_code,200)
 
     def test_production_does_not_expose_or_queue_test_otp(self):
+        self.punch_in_for_test(2,3)
         self.login('a');self.client.post('/visits/6/start',data={'latitude':23,'longitude':72})
         with patch.dict(os.environ,{'ESONE_ENV':'production'}):
             response=self.client.post('/visits/6/request-end-otp',data={'notes':'Visit done','csrf':self.csrf})
@@ -148,6 +161,7 @@ class OperationsTests(unittest.TestCase):
         with SessionLocal() as db:self.assertEqual(db.query(VerificationOTP).count(),0)
 
     def test_test_only_otp_completion_and_replay_rejected(self):
+        self.punch_in_for_test(2,3)
         import re
         self.login('a');self.client.post('/visits/6/start',data={'latitude':23,'longitude':72})
         with patch.dict(os.environ,{'ESONE_ENV':'test'}):
@@ -188,6 +202,7 @@ class OperationsTests(unittest.TestCase):
         self.assertNotIn('secret',response.text)
 
     def test_mobile_has_actual_visit_count_and_no_fake_revenue(self):
+        self.punch_in_for_test(2,3)
         self.login('a');self.client.post('/visits/6/start',data={'latitude':23,'longitude':72})
         response=self.client.get('/mobile')
         self.assertEqual(response.status_code,200)

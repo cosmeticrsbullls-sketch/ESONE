@@ -1,3 +1,4 @@
+from modules.duty import require_duty, on_duty, notice, active_field_work
 """Location-first field onboarding; no schema changes or startup writes."""
 import math
 from datetime import datetime
@@ -29,6 +30,9 @@ def distance(lat, lon, other_lat, other_lon):
 
 
 def intake(request):
+    with SessionLocal() as db:
+        if not on_duty(db, request.session['user_id']):
+            return f'<input type="hidden" name="csrf" value="{token(request)}">'+notice()+'<button disabled aria-disabled="true">📍 CHECK IN VISIT — Punch In first</button>'
     return f'''<div class="card field-intake"><h2>Field Visit</h2>
 <style>.field-intake [hidden]{{display:none!important}}.field-intake #field-submit-message{{padding:12px;border:1px solid #d7b666;border-radius:8px;background:#fff8e8;color:#795415}}.field-intake #field-submit-message.has-error{{border-color:#df9a92;background:#fff2ef;color:#9a3026}}.field-intake label{{display:grid;gap:7px;margin:14px 0}}.field-intake input,.field-intake select,.field-intake textarea{{width:100%}}.field-intake fieldset{{border:0;padding:0;margin:0}}.field-intake .field-grid{{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}}.field-intake button{{margin:8px 6px 8px 0}}@media(max-width:600px){{.field-intake .field-grid{{grid-template-columns:1fr}}.field-intake button{{width:100%}}}}</style>
 <button type="button" id="find-business">📍 CHECK IN VISIT</button>
@@ -76,6 +80,8 @@ def nearby(request: Request, latitude: float, longitude: float):
     if not valid_gps(latitude, longitude): return HTMLResponse('Invalid GPS coordinates.', 400)
     nearby_items, unmapped = [], []
     with SessionLocal() as db:
+        denied=require_duty(db, request)
+        if denied is not None:return denied
         for c in db.query(Client).filter(Client.status != 'INACTIVE').order_by(Client.business_name).all():
             item = {'id': c.id, 'name': c.business_name, 'type': c.client_type, 'area': c.area or c.city or '', 'phone': c.phone or ''}
             if c.latitude is None or c.longitude is None:
@@ -109,6 +115,8 @@ def start(request: Request, latitude: float=Form(...), longitude: float=Form(...
         else:
             # Lock in a consistent order before checking duplicate registrations.
             db.query(User).order_by(User.id).with_for_update().all()
+        denied=require_duty(db, request)
+        if denied is not None:return denied
         prior = db.query(AuditLog).filter_by(user_id=uid, action='FIELD_INTAKE', new_value=submission).first()
         if prior: return RedirectResponse(f'/visits/{prior.entity_id}', 303)
         if client_id:

@@ -8,8 +8,12 @@ from database.models import Client, Activity, Visit, AuditLog
 class FieldIntakeTests(unittest.TestCase):
     setUpClass = classmethod(OperationsTests.setUpClass.__func__)
     setUp = OperationsTests.setUp
+    punch_in_for_test = OperationsTests.punch_in_for_test
+    _base_login = OperationsTests.login
     tearDown = OperationsTests.tearDown
-    login = OperationsTests.login
+    def login(self, who='manager'):
+        self.punch_in_for_test(1,2,3)
+        self._base_login(who)
 
     def test_workspace_visit_links_open_intake_and_start_collection(self):
         response = self.client.get('/field/intake', follow_redirects=False)

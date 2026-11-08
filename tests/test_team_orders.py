@@ -14,6 +14,8 @@ from modules.otp_delivery import DeliveryError
 class TeamOrderTests(unittest.TestCase):
     setUpClass=classmethod(OperationsTests.setUpClass.__func__)
     setUp=OperationsTests.setUp
+    punch_in_for_test=OperationsTests.punch_in_for_test
+    _base_login=OperationsTests.login
     tearDown=OperationsTests.tearDown
     login=OperationsTests.login
 
@@ -49,6 +51,7 @@ class TeamOrderTests(unittest.TestCase):
         self.assertEqual(self.client.get('/employees').status_code,403);self.assertEqual(self.client.post('/employees/2',data=d).status_code,403)
 
     def test_order_prices_16_skus_no_ledger_mutation_and_replay(self):
+        self.punch_in_for_test(2,3)
         self.login('a');self.assertEqual(len(CATALOG),16)
         html=self.client.get('/orders/new').text
         self.assertEqual(len(re.findall(r'name="qty_ES-',html)),16)
@@ -63,6 +66,7 @@ class TeamOrderTests(unittest.TestCase):
         self.client.get('/logout');self.login('b');self.assertEqual(self.client.get(url).status_code,404);self.assertEqual(self.client.get(url+'/pdf').status_code,404)
 
     def test_order_invalid_fields_and_unconnected_whatsapp(self):
+        self.punch_in_for_test(2,3)
         self.login('a')
         for bad in [{'qty_ES-01':'1.5'},{'discount_ES-01':'101'},{'discount_ES-01':'NaN'},{'discount_ES-01':'0.001'},{'qty_ES-01':'-2'},{'csrf':'bad'}]:
             self.assertIn(self.client.post('/orders',data=self.order(**bad)).status_code,[400,403])
@@ -78,6 +82,7 @@ class TeamOrderTests(unittest.TestCase):
         self.assertEqual(self.client.post(url+'/send',data=d).status_code,429)
 
     def test_sales_demo_free_name_edit_availability_and_owner(self):
+        self.punch_in_for_test(2,3)
         self.login('a');d=self.form('/demos/new');scheduled=datetime.now(ZoneInfo('Asia/Kolkata'))+timedelta(days=1)
         d.update(client_id=1,educator_name='Guest Educator',educator_id=0,treatment='NanoBeen',demo_at=scheduled.strftime('%Y-%m-%dT%H:%M'))
         r=self.client.post('/demos',data=d,follow_redirects=False);self.assertEqual(r.status_code,303);url=r.headers['location']
@@ -92,6 +97,7 @@ class TeamOrderTests(unittest.TestCase):
         self.assertEqual(self.client.post(url,data={**edit,'action':'CANCEL','notes':'Cancel'}).status_code,403)
 
     def test_notifications_and_employee_pdf_scope_dates(self):
+        self.punch_in_for_test(2,3)
         self.login('a');self.client.post('/orders',data=self.order(),follow_redirects=False)
         self.assertIn('ORDER',self.client.get('/notifications').text)
         self.assertIn('Book Order',self.client.get('/workspace').text)
@@ -104,6 +110,7 @@ class TeamOrderTests(unittest.TestCase):
         self.assertTrue(self.client.get('/reports/pdf?kind=visits').content.startswith(b'%PDF'))
 
     def test_sales_register_salon_returns_to_order_without_privilege_change(self):
+        self.punch_in_for_test(2,3)
         self.login('a');d=self.form('/salons/new?return_to=/orders/new');d.update(business_name='New Salon',phone='1234567890',return_to='/orders/new')
         r=self.client.post('/salons/new',data=d,follow_redirects=False);self.assertRegex(r.headers['location'],r'^/orders/new\?client_id=\d+$')
         self.assertEqual(self.client.post('/salons/new',data=d,follow_redirects=False).headers['location'],r.headers['location'])

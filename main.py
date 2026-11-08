@@ -1,3 +1,4 @@
+from modules.duty import require_duty, on_duty, notice, active_field_work, open_shift
 import os
 from html import escape
 from secrets import compare_digest, token_urlsafe
@@ -997,6 +998,8 @@ def create_visit(request:Request, client_id:int=Form(...), visit_type:str=Form(.
     if not request.session.get("user_id"): return RedirectResponse("/",303)
     db=SessionLocal()
     try:
+        denied=require_duty(db, request)
+        if denied is not None:return denied
         if not _visit_access(request):return HTMLResponse("Access Denied",403)
         if visit_type.upper() not in {"SALES","COURTESY","COLLECTION"}:return HTMLResponse("Invalid visit type",400)
         if not db.get(Client,client_id):return HTMLResponse("Client not found",404)
@@ -1041,6 +1044,8 @@ def start_visit(activity_id:int,request:Request,latitude:float=Form(...),longitu
     if not request.session.get("user_id"): return HTMLResponse("Login required",401)
     db=SessionLocal()
     try:
+        denied=require_duty(db, request)
+        if denied is not None:return denied
         a=db.query(Activity).filter(Activity.id==activity_id).first(); v=db.query(Visit).filter(Visit.activity_id==activity_id).first()
         if not a or not v:return HTMLResponse("Visit not found",404)
         if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
@@ -1066,6 +1071,8 @@ def _visit_csrf(request, csrf):
 def complete_visit_without_otp(activity_id:int, request:Request, notes:str=Form(""), csrf:str=Form("")):
     if not request.session.get("user_id"):return RedirectResponse("/",303)
     with SessionLocal.begin() as db:
+        denied=require_duty(db, request, finishing=True)
+        if denied is not None:return denied
         a=db.query(Activity).filter_by(id=activity_id).with_for_update().first()
         v=db.query(Visit).filter_by(activity_id=activity_id).first()
         if not a or not v:return HTMLResponse("Visit not found",404)
@@ -1091,6 +1098,8 @@ def request_visit_end_otp(activity_id:int,request:Request,notes:str=Form(""),csr
     from modules.workflows import page
     if not request.session.get("user_id"):return RedirectResponse("/",303)
     with SessionLocal.begin() as db:
+        denied=require_duty(db, request, finishing=True)
+        if denied is not None:return denied
         a=db.query(Activity).filter_by(id=activity_id).with_for_update().first()
         v=db.query(Visit).filter_by(activity_id=activity_id).first()
         if not a or not v:return HTMLResponse("Visit not found",404)
@@ -1132,6 +1141,8 @@ def verify_visit_end_otp(activity_id:int,request:Request,otp:str=Form(...),csrf:
     if not activity_otp_required():return HTMLResponse("OTP verification is paused. Reload the visit page.",409)
     if not request.session.get("user_id"):return RedirectResponse("/",303)
     with SessionLocal.begin() as db:
+        denied=require_duty(db, request, finishing=True)
+        if denied is not None:return denied
         a=db.query(Activity).filter_by(id=activity_id).with_for_update().first()
         v=db.query(Visit).filter_by(activity_id=activity_id).first()
         if not a or not v:return HTMLResponse("Visit not found",404)
@@ -1215,7 +1226,12 @@ async def esone_presentation(request: Request, call_next):
     body = b"".join([chunk async for chunk in response.body_iterator])
     from modules.ui import enhance
     session = request.scope.get("session", {})
-    document = enhance(body.decode("utf-8"), request.url.path,
+    raw_document=body.decode("utf-8")
+    if session.get('user_id') and response.status_code < 400:
+        from modules.duty_ui import gate_controls
+        with SessionLocal() as duty_db:
+            raw_document=gate_controls(raw_document, request.url.path, str(session.get('role') or ''), on_duty(duty_db,session['user_id']), open_shift(duty_db,session['user_id']))
+    document = enhance(raw_document, request.url.path,
                        str(session.get("full_name") or ""), str(session.get("role") or ""),
                        bool(session.get("user_id")))
     from fastapi.responses import Response
