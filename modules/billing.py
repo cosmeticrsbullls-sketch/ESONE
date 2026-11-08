@@ -180,7 +180,7 @@ async def preview(request:Request):
         with SessionLocal() as db:data=read_bill(form,db)
     except (ValueError,InvalidOperation) as error:return HTMLResponse(page('Check Bill Details','<p>'+escape(str(error))+'</p><p>Use browser Back to correct your draft.</p>'),400)
     if str(form.get('output',''))=='pdf':return Response(bill_pdf(data),media_type='application/pdf',headers={'Content-Disposition':'attachment; filename="ESONE_draft_sales_bill.pdf"','Cache-Control':'no-store'})
-    controls='<div class="billing-actions"><p>Review this draft before invoice issuance is enabled.</p><form method="post" action="/billing/preview">'+''.join(f'<input type="hidden" name="{escape(str(k),quote=True)}" value="{escape(str(v),quote=True)}">' for k,v in form.multi_items() if k!='output')+'<button name="output" value="pdf">Download Draft PDF</button></form><p>Use browser Back to edit this preview.</p></div>'
+    controls='<div class="billing-actions"><p>Review this draft before invoice issuance is enabled.</p><p>Your browser saves the PDF in Downloads.</p><form method="post" action="/billing/preview" data-download-form>'+''.join(f'<input type="hidden" name="{escape(str(k),quote=True)}" value="{escape(str(v),quote=True)}">' for k,v in form.multi_items() if k!='output')+'<button name="output" value="pdf">Download Draft PDF</button></form><p>Use browser Back to edit this preview.</p></div>'
     return HTMLResponse(page('Sales Bill Preview',CSS+preview_html(data)+controls),headers={'Cache-Control':'no-store'})
 
 
