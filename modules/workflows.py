@@ -1,3 +1,4 @@
+from modules.duty import require_duty, on_duty, notice, active_field_work, open_shift
 """Management call and demo workflows using the existing schema."""
 import json
 from datetime import date, datetime, time, timezone, timedelta
@@ -99,6 +100,8 @@ def record_call(request: Request, client_id:int=Form(...), kind:str=Form(...), o
         if promised and promised<business_today():raise ValueError('PTP date cannot be in the past.')
     except ValueError as error:return HTMLResponse(escape(str(error)),400)
     with SessionLocal.begin() as db:
+        denied=require_duty(db, request, office_work=True)
+        if denied is not None:return denied
         # Serialize submissions by operator and keep a durable replay marker.
         db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
         if db.query(AuditLog).filter_by(user_id=request.session['user_id'],action='CALL_RECORDED',new_value=submission).first():
@@ -142,6 +145,8 @@ def ptp_followup(ptp_id:int,request:Request,outcome:str=Form(...),notes:str=Form
         if promised and promised<business_today():raise ValueError('PTP date cannot be in the past.')
     except ValueError as error:return HTMLResponse(escape(str(error)),400)
     with SessionLocal.begin() as db:
+        denied=require_duty(db, request, office_work=True)
+        if denied is not None:return denied
         p=db.query(PromiseToPay).filter_by(id=ptp_id).with_for_update().first()
         if not p:return HTMLResponse('PTP not found',404)
         if p.status!='OPEN':return HTMLResponse('This PTP is already closed.',409)
@@ -196,6 +201,8 @@ def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(0),tr
     if treatment == 'OTHER': treatment = custom_treatment
     if not treatment.strip() or len(treatment)>200 or len(notes)>4000 or not 16<=len(submission)<=80:return HTMLResponse('Invalid booking details.',400)
     with SessionLocal.begin() as db:
+        denied=require_duty(db, request, office_work=True)
+        if denied is not None:return denied
         db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
         if db.query(AuditLog).filter_by(user_id=request.session['user_id'],action='DEMO_BOOKED',new_value=submission).first():return HTMLResponse('This demo was already booked.',409)
         if not db.get(Client,client_id):return HTMLResponse('Client not found',404)
@@ -221,7 +228,11 @@ def demo_detail(demo_id:int,request:Request):
         content=f'<p>{escape(c.business_name)} · {escape(d.product_or_treatment or "")} · {d.demo_date} (India)</p><p>Educator: {escape(educator_label)} · {escape(a.status)} · {escape(d.conversion_status or "")}</p><p>{escape(a.notes or "")}</p><p>Follow-up: {d.followup_at.date() if d.followup_at else "—"}</p><p>Started: {d.started_at or "—"} · Completed: {d.completed_at or "—"} (UTC)</p>'
         content+=f'<form method="post" action="/demos/{demo_id}/educator">{hidden(request)}<label>Educator name<input name="educator_name" maxlength="150" value="{escape(educator_label,quote=True)}" required></label><button>Update educator name</button></form>'
         if a.status in {'BOOKED','IN_PROGRESS'}:
-            actions=['START','CANCEL'] if a.status=='BOOKED' else ['COMPLETE']
+            working=on_duty(db,request.session['user_id'])
+            finishing=open_shift(db,request.session['user_id'])
+            actions=(['START','CANCEL'] if working else ['CANCEL']) if a.status=='BOOKED' else (['COMPLETE'] if finishing else [])
+            if not working:content+=notice()
+        if a.status in {'BOOKED','IN_PROGRESS'} and actions:
             content+=f'''<form method="post">{hidden(request)}{choices("action", [(v,{"START":"Start Demo","CANCEL":"Cancel Booking","COMPLETE":"Complete Demo"}[v]) for v in actions], actions[0], "Demo action")}{choices("result", [("CONVERTED","Converted"),("NOT_CONVERTED","Not converted"),("FOLLOW_UP","Follow-up needed")], "CONVERTED", "Conversion result (completion only)")}<label>Notes / reason <textarea name="notes" maxlength="4000" required></textarea></label><label data-when="followup">Follow-up date <input name="followup" type="date"></label><button>Save</button></form>'''
     from modules.pdf_reports import share_button, SHARE_SCRIPT
     return page('Demo Details',content+share_button(f'/activities/{a.id}/pdf',f'ESONE_demo_{demo_id}.pdf')+SHARE_SCRIPT)
@@ -237,10 +248,23 @@ def demo_transition(demo_id:int,request:Request,action:str=Form(...),result:str=
     except ValueError:return HTMLResponse('Invalid follow-up date.',400)
     if action=='COMPLETE' and (result not in {'CONVERTED','NOT_CONVERTED','FOLLOW_UP'} or (result=='FOLLOW_UP' and not due)):return HTMLResponse('Choose a completion result and follow-up date when needed.',400)
     with SessionLocal.begin() as db:
+        if action in {'START','COMPLETE'}:
+            preview=db.get(DemoBooking,demo_id)
+            parent=db.get(Activity,preview.activity_id) if preview else None
+            executor=(preview.assigned_educator_id or parent.assigned_user_id or parent.created_by) if parent else None
+            ids={request.session['user_id']} | ({executor} if executor else set())
+            db.query(User).filter(User.id.in_(ids)).order_by(User.id).with_for_update().all()
+            denied=require_duty(db, request, finishing=action=='COMPLETE')
+            if denied is not None:return denied
         d=db.query(DemoBooking).filter_by(id=demo_id).with_for_update().first()
         if not d:return HTMLResponse('Demo not found',404)
         a=db.get(Activity,d.activity_id)
         if not demo_owner(request,a):return HTMLResponse('Access Denied',403)
+        if action in {'START','COMPLETE'}:
+            executor=d.assigned_educator_id or a.assigned_user_id or a.created_by
+            if executor and executor != request.session['user_id']:
+                db.query(User).filter_by(id=executor).with_for_update().one()
+                if not on_duty(db, executor) and not (action=='COMPLETE' and open_shift(db,executor)):return HTMLResponse('The assigned educator must Punch In before this demo can start or complete.',409)
         old=a.status
         if action=='START' and old=='BOOKED':a.status='IN_PROGRESS';d.started_at=now()
         elif action=='CANCEL' and old=='BOOKED':a.status='CANCELLED';a.completed_at=now()
