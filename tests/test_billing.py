@@ -67,7 +67,7 @@ class BillingRouteTests(unittest.TestCase):
         with SessionLocal() as db:
             before=(db.query(Activity).count(),db.query(AuditLog).count(),db.query(SalesOrder).count(),db.get(Client,1).outstanding_amount)
         for kind,company in [('GST','SHIVAM EXPORT'),('NON_GST','SHIVAM COSMETICS')]:
-            r=self.client.post('/billing/preview',data=self.form(kind));self.assertEqual(r.status_code,200);self.assertIn(company,r.text);self.assertIn('DRAFT — NOT ISSUED',r.text)
+            r=self.client.post('/billing/preview',data=self.form(kind));self.assertEqual(r.status_code,200);self.assertIn(company,r.text);self.assertIn('DRAFT — NOT ISSUED',r.text);self.assertIn('data-download-form',r.text)
             pdf=self.client.post('/billing/preview',data=self.form(kind,output='pdf'))
             self.assertEqual(pdf.headers['content-type'],'application/pdf')
             content=''.join(p.extract_text() for p in PdfReader(BytesIO(pdf.content)).pages)
