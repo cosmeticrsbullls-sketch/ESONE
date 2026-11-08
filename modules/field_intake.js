@@ -37,15 +37,52 @@ search.addEventListener('input',render);
 select.addEventListener('change',()=>{const business=entries.find(c=>String(c.id)===select.value);if(business)openForm(business);});
 document.getElementById('show-registration').addEventListener('click',()=>openForm(null));
 document.getElementById('choose-existing').addEventListener('click',()=>{form.hidden=true;picker.hidden=false;select.value='';message.textContent='Select your business or add a new visit.';});
+const submitMessage=document.getElementById('field-submit-message');
+let submitting=false;
+function showSubmitMessage(text,isError=false){
+ submitMessage.hidden=false;submitMessage.textContent=text;
+ submitMessage.classList.toggle('has-error',isError);
+ if(isError){submitMessage.focus({preventScroll:true});submitMessage.scrollIntoView({block:'center'});}
+}
+async function responseMessage(response){
+ const text=await response.text();
+ if((response.headers.get('content-type')||'').includes('application/json')){
+  try{const data=JSON.parse(text);if(typeof data.detail==='string')return data.detail;
+   if(Array.isArray(data.detail))return data.detail.map(e=>String(e.loc?.at(-1)||'Field')+': '+e.msg).join('; ');
+  }catch(error){}
+ }
+ if(text.includes('<')){
+  const doc=new DOMParser().parseFromString(text,'text/html');
+  doc.querySelectorAll('script,style').forEach(node=>node.remove());
+  return doc.body.textContent.trim().slice(0,600)||'Please try again.';
+ }
+ return text.trim().slice(0,600)||'Please try again.';
+}
 form.addEventListener('submit',async event=> {
- event.preventDefault();if(!form.reportValidity())return;
- const buttons=Array.from(form.querySelectorAll('button'));buttons.forEach(b=>b.disabled=true);
- message.textContent='Saving and starting visit…';
+ event.preventDefault();if(submitting)return;
+ if(!form.reportValidity()){
+  showSubmitMessage('Complete the required business name and mobile fields before starting the visit.');return;
+ }
+ submitting=true;form.setAttribute('aria-busy','true');
+ const buttons=Array.from(form.querySelectorAll('button'));
+ const start=buttons.find(b=>b.type==='submit');const original=start?.textContent;
+ buttons.forEach(b=>b.disabled=true);if(start)start.textContent='Starting visit…';
+ showSubmitMessage('Saving and starting visit…');
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
  try {
- const response=await fetch(form.action,{method:'POST',body:new FormData(form)});
+ const response=await fetch(form.action,{method:'POST',body:new FormData(form),signal:controller.signal});
  if(response.redirected&&response.ok){location.assign(response.url);return;}
- message.textContent=await response.text();
- }catch(error){message.textContent='Connection interrupted. Try again; the same submission will not create a duplicate visit.';}
- buttons.forEach(b=>b.disabled=false);
+ const detail=await responseMessage(response);
+ let help='';
+ if(response.status===409&&/already exists/i.test(detail))help=' Tap BACK TO BUSINESS LIST to select the registered business. Do not register it again.';
+ else if(response.status===409&&/location mismatch/i.test(detail))help=' The current GPS does not match this business. Recheck your location; do not register a duplicate business.';
+ else if(response.status===403)help=' Reload this page and sign in again if requested.';
+ showSubmitMessage('Could not start visit ('+response.status+'): '+detail+help,true);
+ }catch(error){
+ showSubmitMessage('Connection interrupted or timed out. Try again; the same submission will not create a duplicate visit.',true);
+ }finally{
+ clearTimeout(timer);submitting=false;form.removeAttribute('aria-busy');
+ buttons.forEach(b=>b.disabled=false);if(start)start.textContent=original;
+ }
 });
 })();
