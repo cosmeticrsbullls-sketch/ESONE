@@ -3,7 +3,7 @@ import math
 from datetime import datetime
 from secrets import compare_digest, token_urlsafe
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from database.db import SessionLocal
 from database.models import Activity, AuditLog, Client, User, Visit
 from modules.workflows import token
@@ -35,7 +35,7 @@ def intake(request):
 <p id="field-message" role="status" aria-live="polite"></p>
 <section id="field-picker" hidden><h3>Select business</h3>
 <label>Search registered entries <input id="business-search" type="search" placeholder="Name / mobile / area"></label>
-<label>Nearby businesses / first visits <select id="business-select"></select></label>
+<label>Registered businesses near you / first GPS visits <select id="business-select"></select></label>
 <p id="business-help"></p><button type="button" id="show-registration">+ ADD NEW VISIT — REGISTER NEW BUSINESS</button></section>
 <form id="field-form" method="post" action="/field/start" hidden novalidate>
 <input type="hidden" name="csrf" value="{token(request)}"><input type="hidden" name="submission" value="{token_urlsafe(24)}">
@@ -51,6 +51,7 @@ def intake(request):
 <label>Visit purpose <select name="visit_type"><option value="SALES">Sales</option><option value="COURTESY">Courtesy</option><option value="COLLECTION">Collection</option></select></label>
 <label>Visit notes <textarea name="notes" maxlength="4000" placeholder="Purpose / products to discuss / other details"></textarea></label>
 <p id="field-submit-message" role="status" aria-live="polite" tabindex="-1" hidden></p>
+<section id="field-existing-matches" aria-label="Matching registered businesses" hidden></section>
 <button type="submit">START VISIT</button><button type="button" id="choose-existing">← BACK TO BUSINESS LIST</button>
 </form><script src="/field/intake.js?v=3" defer></script></div>'''
 
@@ -121,8 +122,12 @@ def start(request: Request, latitude: float=Form(...), longitude: float=Form(...
                 c.latitude, c.longitude = latitude, longitude
                 db.add(AuditLog(user_id=uid,entity_type='Client',entity_id=c.id,action='GPS_REGISTERED',new_value=f'{latitude},{longitude}'))
         else:
-            if db.query(Client).filter((Client.phone==phone.strip()) | (Client.business_name==business_name.strip())).first():
-                return HTMLResponse('A business with this name or mobile already exists. Choose it from registered businesses, or ask management to review its location.', 409)
+            matches = db.query(Client).filter((Client.phone==phone.strip()) | (Client.business_name==business_name.strip())).order_by(Client.id).limit(20).all()
+            if matches:
+                return JSONResponse({'code':'BUSINESS_ALREADY_EXISTS',
+                    'detail':'This business is already registered. Choose the correct existing business below to start a visit without registering it again.',
+                    'matches':[{'id':c.id,'name':c.business_name,'type':c.client_type,'phone':c.phone or '',
+                                'area':c.area or c.city or '', 'active':c.status!='INACTIVE'} for c in matches]},status_code=409)
             c = Client(business_name=business_name.strip(), client_type=client_type, phone=phone.strip(), contact_person=contact_person.strip() or None, area=area.strip() or None, city=city.strip() or None, address=address.strip() or None, pincode=pincode.strip() or None, status='LEAD', client_category='B', latitude=latitude, longitude=longitude, created_by=uid, assigned_sales_id=uid if request.session['role']=='SALES' else None)
             db.add(c); db.flush()
             db.add(AuditLog(user_id=uid,entity_type='Client',entity_id=c.id,action='FIELD_REGISTERED',new_value=f'{latitude},{longitude}'))
