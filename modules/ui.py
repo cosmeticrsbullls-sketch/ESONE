@@ -125,7 +125,10 @@ document.addEventListener('click',event=>{
  queueMicrotask(()=>{if(!event.defaultPrevented){link.classList.add('is-navigating');link.setAttribute('aria-busy','true');pendingLinks.add(link);}});
 });
 document.addEventListener('submit',event=>{
- const form=event.target;if(pendingForms.has(form)){event.preventDefault();return;}
+ const form=event.target;
+ // A native attachment response does not navigate; leave download forms reusable.
+ if(form.hasAttribute('data-download-form'))return;
+ if(pendingForms.has(form)){event.preventDefault();return;}
  if(event.defaultPrevented)return;
  const button=event.submitter;
  // Run after form-specific validation/GPS handlers; keep submitter name/value intact.
