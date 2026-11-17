@@ -245,19 +245,21 @@ def command_center(request: Request):
     summary = ""
     if role in {"SUPER_ADMIN", "MANAGEMENT", "OFFICE"}:
         from modules.operations import queues
-        from database.models import DemoBooking, Activity
+        from database.models import DemoBooking, DemoBookingRequest, Activity
         with SessionLocal() as db:
             courtesy_count = len(queues(db, "courtesy")[1])
             ptp_rows = queues(db, "ptp")[1]
             today_count = sum(row[6] == "TODAY" for row in ptp_rows)
             overdue_count = sum(row[6] == "OVERDUE" for row in ptp_rows)
             demo_count = db.query(DemoBooking).join(Activity, Activity.id == DemoBooking.activity_id).filter(Activity.status.in_(["BOOKED", "IN_PROGRESS"])).count()
+            pending_demos = db.query(DemoBookingRequest).filter_by(status="PENDING").count()
         from modules.ui import icon
         metrics = [
             ("Courtesy calls due", courtesy_count, "/operations?kind=courtesy", "Salons ready for a follow-up"),
             ("PTP today", today_count, "/operations?kind=ptp", "Promises due today"),
             ("PTP overdue", overdue_count, "/operations?kind=ptp", "Promises needing attention"),
             ("Active demos", demo_count, "/demos", "Booked or in progress"),
+            ("Demo Booking Approvals", pending_demos, "/command-center/demo-requests", "Requests awaiting review"),
         ]
         summary = '<section class="metrics" aria-label="Today’s work">' + ''.join(
             f'<a class="metric" href="{url}"><div class="metric-label">{label}: <strong>{count}</strong></div><div class="number" aria-hidden="true">{count}</div><div class="hint">{hint} →</div></a>' for label,count,url,hint in metrics) + '</section>'
