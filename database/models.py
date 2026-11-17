@@ -21,6 +21,25 @@ class DemoBooking(Base):
     __tablename__='demo_bookings'
     id=Column(Integer,primary_key=True); activity_id=Column(Integer,ForeignKey('activities.id'),unique=True,nullable=False); product_or_treatment=Column(String(200)); booking_source=Column(String(40)); demo_date=Column(DateTime,nullable=False); assigned_educator_id=Column(Integer,ForeignKey('users.id')); location_verification_required=Column(Boolean,default=False); started_at=Column(DateTime); completed_at=Column(DateTime); execution_latitude=Column(Float); execution_longitude=Column(Float); conversion_status=Column(String(30),default='PENDING'); non_conversion_reason=Column(Text); followup_at=Column(DateTime); created_at=Column(DateTime,server_default=func.now())
 
+class DemoBookingRequest(Base):
+    __tablename__ = 'demo_booking_requests'
+    id = Column(Integer, primary_key=True)
+    requested_by = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    source = Column(String(40), nullable=False)
+    client_id = Column(Integer, ForeignKey('clients.id'), nullable=False)
+    treatment = Column(String(200), nullable=False)
+    demo_date = Column(DateTime, nullable=False)
+    educator_id = Column(Integer, ForeignKey('users.id'))
+    educator_name = Column(String(150), nullable=False)
+    notes = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, index=True)
+    reviewed_by = Column(Integer, ForeignKey('users.id'))
+    reviewed_at = Column(DateTime)
+    review_reason = Column(Text)
+    booking_id = Column(Integer, ForeignKey('demo_bookings.id'), unique=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+
 class SalesOrder(Base):
     __tablename__='sales_orders'
     id=Column(Integer,primary_key=True); activity_id=Column(Integer,ForeignKey('activities.id'),unique=True,nullable=False); order_number=Column(String(50),unique=True,index=True); order_source=Column(String(40)); status=Column(String(40),default='PLACED',index=True); subtotal=Column(Numeric(12,2),default=0); discount_amount=Column(Numeric(12,2),default=0); total_amount=Column(Numeric(12,2),default=0); payment_terms=Column(String(200)); delivery_address=Column(Text); created_at=Column(DateTime,server_default=func.now()); updated_at=Column(DateTime,server_default=func.now(),onupdate=func.now())
