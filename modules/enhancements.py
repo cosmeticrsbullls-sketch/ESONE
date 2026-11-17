@@ -32,7 +32,7 @@ def section(request: Request, section: str):
     options = {
       'sales':[('Book Order','/orders/new'),('My orders','/orders'),('Start sales visit','/field/intake?visit_type=SALES'),('My visits','/visits')]+([('Clients','/clients'),('Sales reports','/operations?kind=visits')] if management else []),
       'collection':[('Start collection visit','/field/intake?visit_type=COLLECTION'),('My visits','/visits')]+([('Record collection call','/calls/new'),('Collection reports','/operations'),('Import bills and previous collections','/imports')] if management else []),
-      'demo':[('Book Demo','/demos/new'),('Demo calendar','/demos')]+([('Demo reports','/operations?kind=demos')] if management else [])}
+      'demo':[('Book Demo','/demos/new'),('Demo calendar','/demos'),('My Demo Requests','/demo-requests')]+([('Demo reports','/operations?kind=demos')] if management else [])}
     if section not in options: return HTMLResponse('Not found',404)
     links='<div class="workspace-action-grid" aria-label="'+section.title()+' actions">'+''.join(f'<a class="secondary" href="{url}">{label}</a>' for label,url in options[section])+'</div>'
     if section=='demo' and not management:
