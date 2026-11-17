@@ -1,4 +1,4 @@
-from modules.duty import require_duty, on_duty, notice, active_field_work, open_shift
+from modules.duty import require_duty, on_duty, notice, active_field_work, open_shift, OFFICE_ROLES
 """Management call and demo workflows using the existing schema."""
 import json
 from datetime import date, datetime, time, timezone, timedelta
@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from database.db import SessionLocal
-from database.models import Activity, AuditLog, Client, CollectionActivity, DemoBooking, PromiseToPay, User, DemoEducator
+from database.models import Activity, AuditLog, Client, CollectionActivity, DemoBooking, DemoBookingRequest, PromiseToPay, User, DemoEducator
 from modules.operations import access, business_today
 
 router = APIRouter()
@@ -160,13 +160,12 @@ def ptp_followup(ptp_id:int,request:Request,outcome:str=Form(...),notes:str=Form
 
 
 def demo_access(request, csrf=None):
-    from modules.team import staff_access, MANAGEMENT
-    denied=staff_access(request,csrf)
-    if denied is not None:return denied
-    if request.session.get('role') not in MANAGEMENT|{'SALES'}:return HTMLResponse('Access Denied',403)
+    from modules.team import staff_access
+    return staff_access(request, csrf)
+
 
 def demo_owner(request, activity):
-    return request.session.get('role') in {'SUPER_ADMIN','MANAGEMENT','OFFICE'} or request.session['user_id'] in {activity.created_by,activity.assigned_user_id}
+    return request.session.get('role') in OFFICE_ROLES or request.session['user_id'] in {activity.created_by,activity.assigned_user_id}
 
 @router.get('/demos',response_class=HTMLResponse)
 def demos(request:Request,status:str='',q:str='',month:str='',educator_id:int=0,day:date|None=None):
@@ -188,7 +187,10 @@ def demo_form(request:Request, client_id:int=0, demo_day:date|None=None, educato
         clients=clients_select(db,client_id)
         people='<option value="0" '+('selected' if not educator_id else '')+'>Optional registered educator</option>'+''.join(f'<option value="{u.id}" {"selected" if u.id==educator_id else ""}>{escape(u.full_name)}</option>' for u in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
     date_script='''<script>const input=document.querySelector('input[name=demo_at]');const output=document.querySelector('#date-bookings');let requestNo=0;async function refreshBookings(){const seq=++requestNo;const day=input.value.slice(0,10);if(!day)return;output.textContent='Checking booked demos…';try{const r=await fetch('/demo-availability?day='+encodeURIComponent(day));if(!r.ok)throw Error();const result=await r.json();if(seq!==requestNo)return;output.replaceChildren();const title=document.createElement('strong');title.textContent=result.bookings.length+' demos booked on '+day;output.append(title);result.bookings.forEach(item=>{const row=document.createElement('div');row.textContent=item.time+' · '+item.salon+' · '+item.educator+' · '+item.status;output.append(row);});}catch(e){if(seq===requestNo)output.textContent='Could not check bookings. Open demo calendar before confirming.';}}input.addEventListener('change',refreshBookings);input.addEventListener('input',refreshBookings);document.querySelectorAll('[data-date]').forEach(d=>d.addEventListener('click',()=>setTimeout(refreshBookings,0)));if(input.value)refreshBookings();</script>'''
-    return page('Book Demo',f'''<details open><summary>Already booked demos - choose a day</summary>{calendar}</details><p><a class="secondary" href="/demos">View demo calendar</a></p><form id="demo-booking" method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients, "/demos/new")}<label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" value="{str(demo_day)+'T10:00' if demo_day and demo_day>=business_today() else ''}" required></label><label>Registered educator <select name="educator_id">{people}</select></label><label>Educator name<input name="educator_name" maxlength="150" placeholder="Enter any educator name"></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>Book Demo</button></form><p id="date-bookings" aria-live="polite"></p><script>document.querySelectorAll("[data-date]").forEach(day=>day.addEventListener("click",e=>{{e.preventDefault();document.querySelector("input[name=demo_at]").value=day.dataset.date+"T10:00";document.querySelector("#date-bookings").textContent=day.dataset.demoCount+" demos already booked on "+day.dataset.date+". Check times in calendar before booking.";document.querySelector("#demo-booking").scrollIntoView({{behavior:"smooth"}});}}));</script>'''+date_script)
+    direct_booking = request.session['role'] in OFFICE_ROLES
+    submit_label = 'Book Demo' if direct_booking else 'Request Demo Booking'
+    approval_notice = '' if direct_booking else '<p>Command Center approval is required before the demo appears on the calendar.</p>'
+    return page('Book Demo',approval_notice+f'''<details open><summary>Already booked demos - choose a day</summary>{calendar}</details><p><a class="secondary" href="/demos">View demo calendar</a></p><form id="demo-booking" method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients, "/demos/new")}<label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" value="{str(demo_day)+'T10:00' if demo_day and demo_day>=business_today() else ''}" required></label><label>Registered educator <select name="educator_id">{people}</select></label><label>Educator name<input name="educator_name" maxlength="150" placeholder="Enter any educator name"></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>{submit_label}</button></form><p id="date-bookings" aria-live="polite"></p><script>document.querySelectorAll("[data-date]").forEach(day=>day.addEventListener("click",e=>{{e.preventDefault();document.querySelector("input[name=demo_at]").value=day.dataset.date+"T10:00";document.querySelector("#date-bookings").textContent=day.dataset.demoCount+" demos already booked on "+day.dataset.date+". Check times in calendar before booking.";document.querySelector("#demo-booking").scrollIntoView({{behavior:"smooth"}});}}));</script>'''+date_script)
 
 @router.post('/demos')
 def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(0),treatment:str=Form(...),demo_at:str=Form(...),notes:str=Form(''),csrf:str=Form(''),submission:str=Form(''),custom_treatment:str=Form(''),educator_name:str=Form('')):
@@ -204,15 +206,152 @@ def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(0),tr
         denied=require_duty(db, request, office_work=True)
         if denied is not None:return denied
         db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
-        if db.query(AuditLog).filter_by(user_id=request.session['user_id'],action='DEMO_BOOKED',new_value=submission).first():return HTMLResponse('This demo was already booked.',409)
+        if db.query(AuditLog).filter_by(user_id=request.session['user_id'],new_value=submission).filter(AuditLog.action.in_(['DEMO_BOOKED','DEMO_REQUESTED'])).first():return HTMLResponse('This demo was already booked.',409)
         if not db.get(Client,client_id):return HTMLResponse('Client not found',404)
         educator=db.get(User,educator_id) if educator_id else None
         educator_name=educator_name.strip() or (educator.full_name if educator else '')
         if not educator_name or len(educator_name)>150 or (educator_id and (not educator or not educator.is_active)):return HTMLResponse('Enter an educator name or select an active educator.',400)
-        a=Activity(client_id=client_id,activity_type='DEMO',source=request.session['role'],status='BOOKED',title=treatment.strip(),notes=notes.strip(),scheduled_at=scheduled,assigned_user_id=educator_id or None,created_by=request.session['user_id'],created_at=now())
-        db.add(a);db.flush();d=DemoBooking(activity_id=a.id,product_or_treatment=treatment.strip(),booking_source=request.session['role'],demo_date=scheduled,assigned_educator_id=educator_id or None)
-        db.add(d);db.flush();db.add(DemoEducator(demo_id=d.id,name=educator_name,updated_by=request.session['user_id'],updated_at=now()));identity=d.id;audit(db,request,'DemoBooking',d.id,'DEMO_BOOKED',new=submission)
-    return RedirectResponse(f'/demos/{identity}',303)
+        details = dict(
+            client_id=client_id, treatment=treatment.strip(), demo_date=scheduled,
+            educator_id=educator_id or None, educator_name=educator_name, notes=notes.strip(),
+            source=request.session['role'], requested_by=request.session['user_id'],
+        )
+        if request.session['role'] in OFFICE_ROLES:
+            booking = save_demo_booking(db, **details)
+            audit(db, request, 'DemoBooking', booking.id, 'DEMO_BOOKED', new=submission)
+            destination = f'/demos/{booking.id}'
+        else:
+            pending = DemoBookingRequest(**details, status='PENDING')
+            db.add(pending)
+            db.flush()
+            audit(db, request, 'DemoBookingRequest', pending.id, 'DEMO_REQUESTED', new=submission)
+            destination = '/demo-requests'
+    return RedirectResponse(destination, 303)
+
+
+def save_demo_booking(db, *, client_id, treatment, demo_date, educator_id,
+                      educator_name, notes, source, requested_by):
+    activity = Activity(
+        client_id=client_id, activity_type='DEMO', source=source, status='BOOKED',
+        title=treatment, notes=notes, scheduled_at=demo_date, assigned_user_id=educator_id,
+        created_by=requested_by, created_at=now(),
+    )
+    db.add(activity)
+    db.flush()
+    booking = DemoBooking(
+        activity_id=activity.id, product_or_treatment=treatment, booking_source=source,
+        demo_date=demo_date, assigned_educator_id=educator_id,
+    )
+    db.add(booking)
+    db.flush()
+    db.add(DemoEducator(
+        demo_id=booking.id, name=educator_name, updated_by=requested_by, updated_at=now(),
+    ))
+    return booking
+
+
+@router.get('/demo-requests', response_class=HTMLResponse)
+def my_demo_requests(request: Request):
+    denied = demo_access(request)
+    if denied is not None:
+        return denied
+    return demo_request_list(request, review=False)
+
+
+@router.get('/command-center/demo-requests', response_class=HTMLResponse)
+def demo_approval_queue(request: Request):
+    denied = guard_demo_review(request)
+    if denied is not None:
+        return denied
+    return demo_request_list(request, review=True)
+
+
+def guard_demo_review(request, csrf=None):
+    denied = demo_access(request, csrf)
+    if denied is not None:
+        return denied
+    if request.session.get('role') not in OFFICE_ROLES:
+        return HTMLResponse('Access Denied', 403)
+
+
+def demo_request_list(request, *, review):
+    labels = {'PENDING': 'Pending approval', 'APPROVED': 'Approved', 'REJECTED': 'Rejected'}
+    cards = []
+    with SessionLocal() as db:
+        query = db.query(DemoBookingRequest, Client.business_name, User.full_name).join(
+            Client, Client.id == DemoBookingRequest.client_id
+        ).join(User, User.id == DemoBookingRequest.requested_by)
+        if review:
+            query = query.filter(DemoBookingRequest.status == 'PENDING')
+        else:
+            query = query.filter(DemoBookingRequest.requested_by == request.session['user_id'])
+        for item, salon, requester in query.order_by(DemoBookingRequest.id.desc()):
+            detail = (
+                f'<h2>#{item.id} · {escape(salon)}</h2>'
+                f'<p>{escape(item.treatment)} · {item.demo_date:%d %b %Y, %I:%M %p} (India)</p>'
+                f'<p>Educator: {escape(item.educator_name)}</p>'
+                f'<p>Status: <strong>{labels[item.status]}</strong></p>'
+            )
+            if item.review_reason:
+                detail += f'<p>Review reason: {escape(item.review_reason)}</p>'
+            if item.booking_id:
+                detail += f'<a href="/demos/{item.booking_id}">View booking</a>'
+            if review:
+                detail += f'''<p>Requested by {escape(requester)}</p><p>{escape(item.notes)}</p>
+                    <form method="post" action="/command-center/demo-requests/{item.id}">
+                        {hidden(request)}
+                        <label>Reason (required for rejection)
+                            <textarea name="reason" maxlength="2000"></textarea>
+                        </label>
+                        <button name="decision" value="APPROVED">Approve booking</button>
+                        <button name="decision" value="REJECTED">Reject request</button>
+                    </form>'''
+            cards.append(f'<article class="card">{detail}</article>')
+    title = 'Demo Booking Approvals' if review else 'My Demo Requests'
+    empty = 'No requests are awaiting approval.' if review else 'You have no demo requests.'
+    return HTMLResponse(page(title, ''.join(cards) or f'<p>{empty}</p>'),
+                        headers={'Cache-Control': 'no-store'})
+
+
+@router.post('/command-center/demo-requests/{request_id}')
+def review_demo_request(request_id: int, request: Request, decision: str = Form(...),
+                        reason: str = Form(''), csrf: str = Form('')):
+    denied = guard_demo_review(request, csrf)
+    if denied is not None:
+        return denied
+    reason = reason.strip()
+    if decision not in {'APPROVED', 'REJECTED'} or len(reason) > 2000 or (decision == 'REJECTED' and not reason):
+        return HTMLResponse('Choose a decision and provide a reason for rejection.', 400)
+    with SessionLocal.begin() as db:
+        item = db.get(DemoBookingRequest, request_id)
+        if item is None:
+            return HTMLResponse('Demo request not found.', 404)
+        if item.status != 'PENDING':
+            return HTMLResponse('This request is no longer pending.', 409)
+        if decision == 'APPROVED':
+            if item.demo_date <= datetime.now(ZoneInfo('Asia/Kolkata')).replace(tzinfo=None):
+                return HTMLResponse('The requested time has passed. Reject this request and ask for a new time.', 409)
+            educator = db.get(User, item.educator_id) if item.educator_id else None
+            if item.educator_id and (not educator or not educator.is_active):
+                return HTMLResponse('The selected educator is no longer active.', 409)
+        # Claim the pending row before creating a booking, in the same transaction.
+        updated = db.query(DemoBookingRequest).filter_by(id=request_id, status='PENDING').update({
+            'status': decision, 'reviewed_by': request.session['user_id'],
+            'reviewed_at': now(), 'review_reason': reason or None,
+        })
+        if not updated:
+            return HTMLResponse('This request is no longer pending.', 409)
+        if decision == 'APPROVED':
+            booking = save_demo_booking(
+                db, client_id=item.client_id, treatment=item.treatment, demo_date=item.demo_date,
+                educator_id=item.educator_id, educator_name=item.educator_name, notes=item.notes,
+                source=item.source, requested_by=item.requested_by,
+            )
+            item.booking_id = booking.id
+        audit(db, request, 'DemoBookingRequest', item.id, 'DEMO_REQUEST_REVIEWED', old='PENDING',
+              new=json.dumps({'status': decision, 'booking_id': item.booking_id, 'reason': reason}))
+    return RedirectResponse('/command-center/demo-requests', 303)
+
 
 @router.get('/demos/{demo_id}',response_class=HTMLResponse)
 def demo_detail(demo_id:int,request:Request):
