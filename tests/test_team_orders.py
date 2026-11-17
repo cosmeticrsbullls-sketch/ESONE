@@ -18,6 +18,7 @@ class TeamOrderTests(unittest.TestCase):
     _base_login=OperationsTests.login
     tearDown=OperationsTests.tearDown
     login=OperationsTests.login
+    workbook=OperationsTests.workbook
 
     def form(self,url):
         r=self.client.get(url);self.assertEqual(r.status_code,200)
@@ -85,7 +86,39 @@ class TeamOrderTests(unittest.TestCase):
         self.punch_in_for_test(2,3)
         self.login('a');d=self.form('/demos/new');scheduled=datetime.now(ZoneInfo('Asia/Kolkata'))+timedelta(days=1)
         d.update(client_id=1,educator_name='Guest Educator',educator_id=0,treatment='NanoBeen',demo_at=scheduled.strftime('%Y-%m-%dT%H:%M'))
-        r=self.client.post('/demos',data=d,follow_redirects=False);self.assertEqual(r.status_code,303);url=r.headers['location']
+        response = self.client.post('/demos', data=d, follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers['location'], '/demo-requests')
+        self.assertIn('Pending approval', self.client.get('/demo-requests').text)
+        self.assertEqual(self.client.post('/demos', data=d).status_code, 409)
+
+        review_url = '/command-center/demo-requests/1'
+        availability_url = '/demo-availability?day=' + str(scheduled.date())
+        self.client.get('/logout')
+        self.login('b')
+        self.assertNotIn('Guest Educator', self.client.get('/demo-requests').text)
+        self.assertEqual(self.client.get(availability_url).json()['bookings'], [])
+        self.assertEqual(self.client.get('/command-center/demo-requests').status_code, 403)
+        csrf = self.form('/demos/new')['csrf']
+        self.assertEqual(self.client.post(review_url, data={'csrf': csrf, 'decision': 'APPROVED'}).status_code, 403)
+
+        self.client.get('/logout')
+        self.login()
+        queue = '/command-center/demo-requests'
+        self.assertIn('Guest Educator', self.client.get(queue).text)
+        self.assertEqual(len(self.workbook(self.client.get('/reports/export?kind=demos'))), 1)
+        review = {'csrf': self.form(queue)['csrf'], 'decision': 'APPROVED'}
+        self.assertEqual(self.client.post(review_url, data={**review, 'csrf': 'wrong'}).status_code, 403)
+        self.assertEqual(self.client.post(review_url, data=review, follow_redirects=False).status_code, 303)
+        self.assertEqual(self.client.post(review_url, data=review).status_code, 409)
+
+        self.client.get('/logout')
+        self.login('a')
+        tracking = self.client.get('/demo-requests').text
+        self.assertIn('Approved', tracking)
+        booking_link = re.search(r'href="(/demos/\d+)"', tracking)
+        self.assertIsNotNone(booking_link)
+        url = booking_link.group(1)
         self.assertIn('Guest Educator',self.client.get(url).text)
         available=self.client.get('/demo-availability?day='+str(scheduled.date())).json();self.assertEqual(len(available['bookings']),1);self.assertEqual(available['bookings'][0]['educator'],'Guest Educator')
         self.assertIn('Guest Educator',self.client.get('/demos/new?demo_day='+str(scheduled.date())).text)
@@ -93,8 +126,35 @@ class TeamOrderTests(unittest.TestCase):
         self.assertEqual(self.client.post(url+'/educator',data=edit,follow_redirects=False).status_code,303)
         self.assertIn('Edited Educator',self.client.get(url).text)
         self.client.get('/logout');self.login('b');self.assertEqual(self.client.get(url).status_code,403)
+        self.assertIn('Edited Educator', self.client.get('/demos?day='+str(scheduled.date())).text)
         edit['csrf']=self.form('/demos/new')['csrf'];self.assertEqual(self.client.post(url+'/educator',data=edit).status_code,403)
         self.assertEqual(self.client.post(url,data={**edit,'action':'CANCEL','notes':'Cancel'}).status_code,403)
+
+    def test_demo_rejection_reason_is_visible_only_in_request_tracking(self):
+        self.punch_in_for_test(2)
+        self.login('a')
+        booking = self.form('/demos/new')
+        scheduled = datetime.now(ZoneInfo('Asia/Kolkata')) + timedelta(days=1)
+        booking.update(client_id=1, educator_name='Guest', treatment='NanoBeen',
+                       demo_at=scheduled.strftime('%Y-%m-%dT%H:%M'))
+        self.assertEqual(self.client.post('/demos', data=booking, follow_redirects=False).status_code, 303)
+
+        self.client.get('/logout')
+        self.login()
+        queue = '/command-center/demo-requests'
+        decision = {'csrf': self.form(queue)['csrf'], 'decision': 'REJECTED'}
+        self.assertEqual(self.client.post(queue + '/1', data=decision).status_code, 400)
+        decision['reason'] = 'Educator unavailable'
+        self.assertEqual(self.client.post(queue + '/1', data=decision, follow_redirects=False).status_code, 303)
+        self.assertIn('No requests are awaiting approval', self.client.get(queue).text)
+
+        self.client.get('/logout')
+        self.login('a')
+        tracking = self.client.get('/demo-requests').text
+        self.assertIn('Rejected', tracking)
+        self.assertIn('Educator unavailable', tracking)
+        with SessionLocal() as db:
+            self.assertEqual(db.query(DemoBooking).count(), 0)
 
     def test_notifications_and_employee_pdf_scope_dates(self):
         self.punch_in_for_test(2,3)
