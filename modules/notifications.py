@@ -48,7 +48,7 @@ def inbox(db,request):
         for kind in ['ptp','courtesy']:
             _,rows=queues(db,kind)
             for r in rows:items.append((('PTP due / overdue: '+str(r[2])) if kind=='ptp' else ('Courtesy call due: '+str(r[1])),'/operations?kind='+kind,lower))
-        for event in db.query(AuditLog).filter(AuditLog.created_at>=lower,AuditLog.created_at<upper,AuditLog.action.in_(['MANAGEMENT_CLOSE','PROFILE_UPDATED','ADMIN_PASSWORD_RESET','PUNCH_IN','PUNCH_OUT'])).order_by(AuditLog.id.desc()).limit(500):
+        for event in db.query(AuditLog).filter(AuditLog.created_at>=lower,AuditLog.created_at<upper,AuditLog.action.in_(['MANAGEMENT_CLOSE','PROFILE_UPDATED','ADMIN_PASSWORD_RESET','PUNCH_IN','PUNCH_OUT','AUTO_PUNCH_OUT'])).order_by(AuditLog.id.desc()).limit(500):
             items.append((f'{people.get(event.user_id,"Management")} · {event.action.replace("_"," ")}', '/activity-reports',event.created_at))
     return sorted(items,key=lambda x:x[2],reverse=True)
 
