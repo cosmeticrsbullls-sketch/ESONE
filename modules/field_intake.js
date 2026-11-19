@@ -24,7 +24,7 @@ function render() {
   select.appendChild(group);
  }
  select.disabled=!matches.length;
- document.getElementById('business-help').textContent=matches.length?'Select your business. If your target is missing, use Add New Visit.':'Your target is not in the list? Use Add New Visit below.';
+ document.getElementById('business-help').textContent=matches.length?'Select the registered business to start your visit.':'No matching business. Use Add Business on Home to register it first.';
 }
 find.addEventListener('click',()=> {
  form.hidden=true;picker.hidden=true;find.disabled=true;message.textContent='Checking your location…';
@@ -37,15 +37,15 @@ find.addEventListener('click',()=> {
  const data=await response.json();entries=[...data.nearby,...data.unmapped];
  form.elements.latitude.value=lat;form.elements.longitude.value=lon;
  search.value='';render();find.hidden=true;picker.hidden=false;
- message.textContent=`${data.nearby.length} registered businesses found within ${data.radius_m}m. Select your business, or use Add New Visit if it is not registered. Businesses without GPS are listed separately for their first verified visit.`;
+ message.textContent=`${data.nearby.length} registered businesses found within ${data.radius_m}m. Select your registered business. Register a missing business using Add Business on Home. Businesses without GPS are listed separately for their first verified visit.`;
  }catch(error){message.textContent='Could not check businesses. '+error.message;}
  finally{find.disabled=false;}
  },error=>{message.textContent='Allow location permission and turn on GPS, then try again. '+error.message;find.disabled=false;},{enableHighAccuracy:true,timeout:20000,maximumAge:0});
 });
 search.addEventListener('input',render);
 select.addEventListener('change',()=>{const business=entries.find(c=>String(c.id)===select.value);if(business)openForm(business);});
-document.getElementById('show-registration').addEventListener('click',()=>openForm(null));
-document.getElementById('choose-existing').addEventListener('click',()=>{form.hidden=true;picker.hidden=false;select.value='';message.textContent='Select your business or add a new visit.';});
+
+document.getElementById('choose-existing').addEventListener('click',()=>{form.hidden=true;picker.hidden=false;select.value='';message.textContent='Select your registered business.';});
 const submitMessage=document.getElementById('field-submit-message'),existingMatches=document.getElementById('field-existing-matches');
 let submitting=false;
 function showSubmitMessage(text,isError=false){
