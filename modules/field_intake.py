@@ -40,7 +40,7 @@ def intake(request):
 <section id="field-picker" hidden><h3>Select business</h3>
 <label>Search registered entries <input id="business-search" type="search" placeholder="Name / mobile / area"></label>
 <label>Registered businesses near you / first GPS visits <select id="business-select"></select></label>
-<p id="business-help"></p><button type="button" id="show-registration">+ ADD NEW VISIT — REGISTER NEW BUSINESS</button></section>
+<p id="business-help"></p><p>Business missing? Register it using Add Business on Home, then return to start your visit.</p><a class="secondary" href="/workspace">Back to Home</a></section>
 <form id="field-form" method="post" action="/field/start" hidden novalidate>
 <input type="hidden" name="csrf" value="{token(request)}"><input type="hidden" name="submission" value="{token_urlsafe(24)}">
 <input type="hidden" name="latitude"><input type="hidden" name="longitude"><input type="hidden" name="client_id">
@@ -57,7 +57,7 @@ def intake(request):
 <p id="field-submit-message" role="status" aria-live="polite" tabindex="-1" hidden></p>
 <section id="field-existing-matches" aria-label="Matching registered businesses" hidden></section>
 <button type="submit">START VISIT</button><button type="button" id="choose-existing">← BACK TO BUSINESS LIST</button>
-</form><script src="/field/intake.js?v=3" defer></script></div>'''
+</form><script src="/field/intake.js?v=4" defer></script></div>'''
 
 
 @router.get('/field/intake', response_class=HTMLResponse)
