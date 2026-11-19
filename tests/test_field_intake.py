@@ -67,7 +67,8 @@ def test_empty_database_offers_registration(self):
     result=self.client.get('/field/nearby?latitude=23&longitude=72').json()
     self.assertEqual(result['nearby'],[]);self.assertEqual(result['unmapped'],[])
     html=self.client.get('/visits').text
-    self.assertIn('ADD NEW VISIT — REGISTER NEW BUSINESS',html)
+    self.assertIn('Register it using Add Business on Home',html)
+    self.assertNotIn('id="show-registration"',html)
     self.assertNotIn('Select Salon',html)
     response=self.client.post('/field/start',data={**data,'business_name':'New Academy','phone':'999','client_type':'ACADEMY','address':'Test address','pincode':'380001','notes':'Discuss treatments'},follow_redirects=False)
     self.assertEqual(response.status_code,303)

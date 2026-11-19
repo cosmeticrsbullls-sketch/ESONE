@@ -40,14 +40,14 @@ def intake(request):
 <section id="field-picker" hidden><h3>Select business</h3>
 <label>Search registered entries <input id="business-search" type="search" placeholder="Name / mobile / area"></label>
 <label>Registered businesses near you / first GPS visits <select id="business-select"></select></label>
-<p id="business-help"></p><button type="button" id="show-registration">+ ADD NEW VISIT — REGISTER NEW BUSINESS</button></section>
+<p id="business-help"></p><p>Business missing? Register it using Add Business on Home, then return to start your visit.</p><a class="secondary" href="/workspace">Back to Home</a></section>
 <form id="field-form" method="post" action="/field/start" hidden novalidate>
 <input type="hidden" name="csrf" value="{token(request)}"><input type="hidden" name="submission" value="{token_urlsafe(24)}">
 <input type="hidden" name="latitude"><input type="hidden" name="longitude"><input type="hidden" name="client_id">
 <h3 id="visit-form-title">Visit details</h3><p id="selected-business"></p>
 <fieldset id="field-registration" hidden disabled><legend>New business details</legend><div class="field-grid">
 <label>Business name * <input name="business_name" required maxlength="200"></label>
-<label>Business type <select name="client_type"><option value="SALON">Salon</option><option value="DISTRIBUTOR">Distributor</option><option value="ACADEMY">Academy</option><option value="OTHER">Other</option></select></label>
+<label>Business type <select name="client_type"><option value="SALON">Salon</option><option value="UNISEX">Unisex</option><option value="PARLOR">Parlor</option><option value="DISTRIBUTOR">Distributor</option><option value="ACADEMY">Academy</option><option value="OTHER">Other</option></select></label>
 <label>Owner / contact person <input name="contact_person" maxlength="150"></label>
 <label>Mobile * <input name="phone" type="tel" required maxlength="20"></label>
 <label>Area <input name="area" maxlength="120"></label><label>City <input name="city" maxlength="120"></label>
@@ -57,7 +57,7 @@ def intake(request):
 <p id="field-submit-message" role="status" aria-live="polite" tabindex="-1" hidden></p>
 <section id="field-existing-matches" aria-label="Matching registered businesses" hidden></section>
 <button type="submit">START VISIT</button><button type="button" id="choose-existing">← BACK TO BUSINESS LIST</button>
-</form><script src="/field/intake.js?v=3" defer></script></div>'''
+</form><script src="/field/intake.js?v=4" defer></script></div>'''
 
 
 @router.get('/field/intake', response_class=HTMLResponse)
@@ -104,7 +104,7 @@ def start(request: Request, latitude: float=Form(...), longitude: float=Form(...
     if not valid_gps(latitude, longitude) or visit_type not in {'SALES', 'COURTESY', 'COLLECTION'} or not 16 <= len(submission) <= 80:
         return HTMLResponse('Invalid visit details.', 400)
     if client_id and not client_id.isdecimal(): return HTMLResponse('Select a valid registered business.', 400)
-    if not client_id and (not business_name.strip() or not phone.strip() or client_type not in {'SALON', 'DISTRIBUTOR', 'ACADEMY', 'OTHER'}):
+    if not client_id and (not business_name.strip() or not phone.strip() or client_type not in {'SALON', 'UNISEX', 'PARLOR', 'DISTRIBUTOR', 'ACADEMY', 'OTHER'}):
         return HTMLResponse('Business name, mobile and valid business type are required.', 400)
     if any(len(value)>limit for value,limit in [(business_name,200),(phone,20),(contact_person,150),(area,120),(city,120),(address,500),(pincode,12),(notes,4000)]):
         return HTMLResponse('Business details are too long.', 400)

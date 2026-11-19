@@ -54,12 +54,12 @@ class CalendarTests(unittest.TestCase):
         with SessionLocal() as db:self.assertEqual(before,db.query(Activity).count())
         self.client.get('/logout');self.login('a');self.assertEqual(self.client.get('/demos').status_code,200)
 
-    def test_empty_salon_options_are_explicit_and_registration_is_visible(self):
+    def test_empty_business_options_direct_registration_to_home(self):
         self.login()
         with SessionLocal() as db:db.query(Client).delete();db.commit()
         response=self.client.get('/demos/new')
-        self.assertIn('No salons registered',response.text);self.assertIn('+ New Salon',response.text)
-        self.assertIn('Search salon / phone',response.text)
+        self.assertIn('No businesses registered',response.text);self.assertIn('Add Business on Home',response.text)
+        self.assertIn('Search business / mobile',response.text)
         self.assertIn('name="client_id" required',response.text)
         self.assertIn('id="new-salon"',self.client.get('/clients').text)
 

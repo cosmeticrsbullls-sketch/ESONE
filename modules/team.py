@@ -3,7 +3,7 @@ from modules.duty import require_duty, on_duty, notice, active_field_work
 from datetime import date
 from html import escape
 from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from database.db import SessionLocal
 from database.models import User, EmployeeProfile, Attendance
 from modules.workflows import hidden, page, now, audit
@@ -105,34 +105,174 @@ async def save_profile(user_id:int,request:Request):
         p.updated_at=now();audit(db,request,'EmployeeProfile',user_id,'PROFILE_UPDATED')
     return RedirectResponse('/employees',303)
 
-@router.get('/salons/new',response_class=HTMLResponse)
-def salon_new(request:Request,return_to:str='/demos/new'):
-    denied=staff_access(request)
-    if denied is not None:return denied
-    if request.session.get('role') not in MANAGEMENT|{'SALES'}:return HTMLResponse('Access Denied',403)
-    destination=return_to if return_to in {'/demos/new','/orders/new','/calls/new'} else '/workspace'
-    return page('Register Salon',f'<form method="post">{hidden(request)}<input type="hidden" name="return_to" value="{destination}"><label>Salon name<input name="business_name" maxlength="200" required></label><label>Contact person<input name="contact_person" maxlength="150"></label><label>Mobile / WhatsApp<input name="phone" type="tel" maxlength="20"></label><label>Area<input name="area" maxlength="120"></label><label>City<input name="city" maxlength="120"></label><label>Address<textarea name="address" maxlength="500"></textarea></label><button>Register &amp; Continue</button><p>This registers business details; GPS is recorded during field check-in.</p></form>')
+def business_text(value):
+    return ' '.join((value or '').casefold().split())
+
+
+def business_phone(value):
+    digits = ''.join(char for char in (value or '') if char.isdecimal())
+    if len(digits) == 12 and digits.startswith('91'):
+        return digits[2:]
+    if len(digits) == 11 and digits.startswith('0'):
+        return digits[1:]
+    return digits
+
+
+@router.get('/business-search')
+def business_search(request: Request, q: str = ''):
+    denied = staff_access(request)
+    if denied is not None:
+        return denied
+    if len(q) > 200:
+        return HTMLResponse('Search must be 200 characters or fewer.', 400)
+    term = business_text(q)
+    phone = business_phone(q)
+    if not term:
+        return JSONResponse({'matches': []}, headers={'Cache-Control': 'no-store'})
+    from database.models import Client
+    with SessionLocal() as db:
+        matches = []
+        for client in db.query(Client).order_by(Client.business_name, Client.id):
+            name_match = term in business_text(client.business_name)
+            phone_match = bool(phone) and phone in business_phone(client.phone)
+            if name_match or phone_match:
+                matches.append({
+                    'id': client.id, 'name': client.business_name,
+                    'phone': client.phone or '', 'area': client.area or client.city or '',
+                    'active': client.status != 'INACTIVE',
+                })
+            if len(matches) == 20:
+                break
+    return JSONResponse({'matches': matches}, headers={'Cache-Control': 'no-store'})
+
+
+@router.get('/salons/new', response_class=HTMLResponse)
+def salon_new(request: Request, return_to: str = ''):
+    denied = staff_access(request)
+    if denied is not None:
+        return denied
+    content = f'''
+    <style>
+      .business-registration {{max-width:720px}}
+      .business-registration [hidden] {{display:none!important}}
+      .business-registration .business-results {{margin:0;padding:0;list-style:none;border:1px solid #cbd5df;border-radius:8px;overflow:hidden}}
+      .business-registration .business-results button {{display:block;width:100%;text-align:left;border-radius:0;margin:0;padding:14px;white-space:normal}}
+      .business-registration .business-results small {{display:block}}
+      .business-registration label {{display:block;margin:16px 0}}
+      .business-registration input,.business-registration select {{width:100%;max-width:100%}}
+      .business-registration input[type="checkbox"] {{width:auto}}
+      .business-registration .notice {{padding:12px;background:#fff7e5;border-radius:8px}}
+    </style>
+    <div class="business-registration">
+      <p>Search first to check whether the business is already registered.</p>
+      <label for="registration-search">Business name or mobile number</label>
+      <input id="registration-search" type="search" maxlength="200" autocomplete="off"
+             placeholder="Type business name or mobile" aria-controls="registration-results">
+      <p id="registration-status" role="status" aria-live="polite"></p>
+      <ul id="registration-results" class="business-results" aria-label="Matching businesses" hidden></ul>
+      <section id="registered-business" hidden>
+        <h2>Already registered</h2><p id="registered-business-name"></p>
+        <p>Select this business when starting Sales, Collection, Demo or Order.</p>
+        <a class="primary" href="/workspace">Back to Home</a>
+      </section>
+      <button type="button" id="add-business" hidden>+ Register New Business</button>
+      <form id="business-registration-form" method="post" action="/salons/new" hidden>
+        {hidden(request)}
+        <label>Business name<input name="business_name" maxlength="200" required></label>
+        <label>Mobile number<input name="phone" type="tel" maxlength="20" required></label>
+        <label>Business type<select name="client_type"><option value="SALON">Salon</option><option value="UNISEX">Unisex</option><option value="PARLOR">Parlor</option><option value="DISTRIBUTOR">Distributor</option><option value="ACADEMY">Academy</option><option value="OTHER">Other</option></select></label>
+        <label><input type="checkbox" name="at_location" value="yes" id="business-at-location"> I am at the actual business location. Capture GPS when saving.</label>
+        <input type="hidden" name="latitude"><input type="hidden" name="longitude"><input type="hidden" name="accuracy">
+        <p id="business-gps-status" role="status" aria-live="polite"></p>
+        <details><summary>Additional details (optional)</summary>
+          <label>Contact person<input name="contact_person" maxlength="150"></label>
+          <label>Area<input name="area" maxlength="120"></label>
+          <label>City<input name="city" maxlength="120"></label>
+          <label>Address<textarea name="address" maxlength="500"></textarea></label>
+        </details>
+        <p id="registration-error" role="alert" hidden></p>
+        <button type="submit">Save Business</button>
+      </form>
+      <p>Registering from elsewhere? Leave the location option unchecked. GPS can be recorded at the first visit.</p>
+      <p><a href="/workspace">Home</a></p>
+      <noscript>Enable JavaScript to search and register a business.</noscript>
+    </div>
+    <script src="/business-registration.js?v=2" defer></script>'''
+    return HTMLResponse(page('Add Business', content), headers={'Cache-Control': 'no-store'})
+
+
+@router.get('/business-registration.js', include_in_schema=False)
+def business_registration_script():
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).with_name('business_registration.js'),
+                        media_type='application/javascript')
+
 
 @router.post('/salons/new')
-async def salon_create(request:Request):
-    denied=staff_access(request)
-    if denied is not None:return denied
-    if request.session.get('role') not in MANAGEMENT|{'SALES'}:return HTMLResponse('Access Denied',403)
-    f=await request.form();denied=staff_access(request,str(f.get('csrf','')))
-    if denied is not None:return denied
-    fields={'business_name':200,'contact_person':150,'phone':20,'area':120,'city':120,'address':500}
-    values={k:str(f.get(k,'')).strip() for k in fields}
-    if not values['business_name'] or any(len(values[k])>limit for k,limit in fields.items()):return HTMLResponse('Enter valid salon details',400)
+async def salon_create(request: Request):
+    denied = staff_access(request)
+    if denied is not None:
+        return denied
+    form = await request.form()
+    denied = staff_access(request, str(form.get('csrf', '')))
+    if denied is not None:
+        return denied
+    fields = {'business_name': 200, 'phone': 20, 'contact_person': 150,
+              'area': 120, 'city': 120, 'address': 500}
+    values = {key: str(form.get(key, '')).strip() for key in fields}
+    client_type = str(form.get('client_type', 'SALON'))
+    invalid = (not values['business_name'] or not business_phone(values['phone'])
+               or client_type not in {'SALON', 'UNISEX', 'PARLOR', 'DISTRIBUTOR', 'ACADEMY', 'OTHER'}
+               or any(len(values[key]) > limit for key, limit in fields.items()))
+    if invalid:
+        return JSONResponse({'detail': 'Enter a business name, mobile number and valid business type.'}, status_code=400)
+    at_location = str(form.get('at_location', '')) == 'yes'
+    latitude = longitude = accuracy = None
+    if at_location:
+        try:
+            latitude = float(form.get('latitude', ''))
+            longitude = float(form.get('longitude', ''))
+            accuracy = float(form.get('accuracy', ''))
+        except (TypeError, ValueError):
+            return JSONResponse({'detail': 'Capture GPS at the actual business location before saving.'}, status_code=400)
+        if not valid_gps(latitude, longitude) or not math.isfinite(accuracy) or not 0 <= accuracy <= 200:
+            return JSONResponse({'detail': 'GPS is invalid or too inaccurate. Enable precise location and try again.'}, status_code=400)
     from database.models import Client
     with SessionLocal.begin() as db:
-        db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
-        denied=require_duty(db, request, office_work=True)
-        if denied is not None:return denied
-        # Reuse an exact salon/phone match on retry; business contact changes use edit approval.
-        c=db.query(Client).filter_by(business_name=values['business_name'],phone=values['phone']).first()
-        if not c:
-            c=Client(**values,created_by=request.session['user_id'],assigned_sales_id=request.session['user_id'] if request.session['role']=='SALES' else None);db.add(c);db.flush();audit(db,request,'Client',c.id,'SALON_REGISTERED')
-        cid=c.id
-    dest=str(f.get('return_to',''))
-    if dest not in {'/demos/new','/orders/new','/calls/new'}:dest='/workspace'
-    return RedirectResponse(dest+('?client_id='+str(cid) if dest!='/workspace' else ''),303)
+        # All registration paths acquire user locks in the same order.
+        db.query(User).order_by(User.id).with_for_update().all()
+        denied = require_duty(db, request, office_work=True)
+        if denied is not None:
+            return denied
+        name = business_text(values['business_name'])
+        phone = business_phone(values['phone'])
+        matches = [
+            client for client in db.query(Client).order_by(Client.id)
+            if business_text(client.business_name) == name or business_phone(client.phone) == phone
+        ]
+        if matches:
+            return JSONResponse({
+                'detail': 'This business is already registered. Select the existing business.',
+                'matches': [{'name': c.business_name, 'phone': c.phone or '',
+                             'active': c.status != 'INACTIVE'} for c in matches[:20]],
+            }, status_code=409)
+        client = Client(
+            **values, client_type=client_type, latitude=latitude, longitude=longitude, created_by=request.session['user_id'],
+            assigned_sales_id=request.session['user_id'] if request.session['role'] == 'SALES' else None,
+        )
+        db.add(client)
+        db.flush()
+        audit(db, request, 'Client', client.id, 'SALON_REGISTERED')
+        if at_location:
+            import json
+            audit(db, request, 'Client', client.id, 'GPS_REGISTERED',
+                  new=json.dumps({'latitude': latitude, 'longitude': longitude, 'accuracy_m': accuracy}))
+
+        label = client.business_name
+    request.session['business_registration_notice'] = (
+        f'Business registered successfully: {label}. Select it when starting an activity.'
+    )
+    if 'application/json' in request.headers.get('accept', ''):
+        return JSONResponse({'redirect': '/workspace'})
+    return RedirectResponse('/workspace', 303)

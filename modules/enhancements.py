@@ -20,6 +20,10 @@ def workspace(request: Request):
         opened = db.query(Attendance.id).filter_by(user_id=request.session['user_id'], punch_out_at=None).first()
     punch_label = 'Punch Out' if opened else 'Punch In'
     content = '<div class="workspace-buttons"><a href="/workspace/sales">Sales</a><a href="/workspace/collection">Collection</a><a href="/workspace/demo">Demo</a><a href="/orders/new">Book Order</a></div>'
+    content += '<p><a class="primary" data-action-icon="clients" href="/salons/new">Add Business</a></p>'
+    registration_notice = request.session.pop('business_registration_notice', None)
+    if registration_notice:
+        content = '<p class="notice" role="status">'+escape(registration_notice)+'</p>'+content
     if request.session.get('role') in MANAGEMENT:
         content += '<p><a href="/command-center">Open Command Center</a></p>'
     content += f'<div class="home-quick-actions" aria-label="Attendance and reports"><a class="secondary" href="/attendance">{punch_label}</a><a class="secondary" href="/activity-reports">My Daily / Monthly Reports</a></div>'
