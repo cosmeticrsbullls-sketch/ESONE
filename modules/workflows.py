@@ -39,7 +39,7 @@ def page(title, content):
     return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ESONE {escape(title)}</title><style>body{{font:16px Arial;background:#f5f5f5;color:#222;margin:20px}}main{{max-width:1100px;margin:auto;background:white;padding:24px;border-radius:12px}}label{{display:block;margin:14px 0}}input,select,textarea,button{{padding:10px;max-width:100%;box-sizing:border-box}}table{{border-collapse:collapse;width:100%}}td,th{{padding:12px;border-bottom:1px solid #ddd;text-align:left}}.table{{overflow:auto}}a{{color:#725700}}button{{cursor:pointer}}</style></head><body><main class="workflow"><nav><a href="/command-center">Command Center</a> · <a href="/operations">Reports</a> · <a href="/calls/new">Record Call</a> · <a href="/demos">Demos</a></nav><h1>{escape(title)}</h1>{content}</main><script>
 document.querySelectorAll('.salon-picker').forEach(picker=>{{
 const search=picker.querySelector('.salon-search');const select=picker.querySelector('select');const original=Array.from(select.options).map(option=>({{value:option.value,text:option.text,disabled:option.disabled}}));
-search.addEventListener('input',()=>{{const selected=select.value;const term=search.value.trim().toLowerCase();const matches=original.filter(option=>option.value&&option.text.toLowerCase().includes(term));select.replaceChildren();const placeholder=new Option(matches.length?'Select a salon':original.length===1?'No salons registered — add a new salon first':'No matching salons — change search', '');placeholder.disabled=true;select.add(placeholder);matches.forEach(option=>select.add(new Option(option.text,option.value)));select.value=matches.some(option=>option.value===selected)?selected:'';picker.querySelector('.salon-help').textContent=matches.length?matches.length+' matching salons':'Use + New Salon to register a salon, or change your search.';}});
+search.addEventListener('input',()=>{{const selected=select.value;const term=search.value.trim().toLowerCase();const matches=original.filter(option=>option.value&&option.text.toLowerCase().includes(term));select.replaceChildren();const placeholder=new Option(matches.length?'Select a salon':original.length===1?'No businesses registered — use Add Business on Home':'No matching businesses — change search', '');placeholder.disabled=true;select.add(placeholder);matches.forEach(option=>select.add(new Option(option.text,option.value)));select.value=matches.some(option=>option.value===selected)?selected:'';picker.querySelector('.salon-help').textContent=matches.length?matches.length+' matching businesses':'Register a missing business using Add Business on Home, or change your search.';}});
 }});
 document.querySelectorAll('form').forEach(form=>{{
 const refresh=()=>{{
@@ -60,14 +60,14 @@ def choices(name, options, selected, title):
 
 def clients_select(db, selected=0):
     clients=db.query(Client).order_by(Client.business_name, Client.id).all()
-    prompt='Select a salon' if clients else 'No salons registered — add a new salon first'
+    prompt='Select a salon' if clients else 'No businesses registered — use Add Business on Home'
     options=f'<option value="" disabled {"selected" if not any(c.id==selected for c in clients) else ""}>{prompt}</option>'
     options+=''.join(f'<option value="{c.id}" {"selected" if c.id==selected else ""}>{escape(c.business_name)} · {escape(c.phone or c.area or "")}</option>' for c in clients)
     return options
 
 
 def salon_field(options, destination):
-    return f'''<div class="salon-picker"><label>Salon <input type="search" class="salon-search" placeholder="Search salon / phone" aria-label="Search salon options" autocomplete="off"><select name="client_id" required aria-label="Salon">{options}</select></label><a class="secondary" href="/salons/new?return_to={destination}">+ New Salon</a><small class="salon-help" aria-live="polite">Select a registered salon, or add a new one.</small></div>'''
+    return f'''<div class="salon-picker"><label>Business <input type="search" class="salon-search" placeholder="Search business / mobile" aria-label="Search salon options" autocomplete="off"><select name="client_id" required aria-label="Salon">{options}</select></label><small class="salon-help" aria-live="polite">Select a registered business. Register a missing business using Add Business on Home.</small></div>'''
 
 
 def amount(value):
