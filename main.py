@@ -1,5 +1,7 @@
 from modules.duty import require_duty, on_duty, notice, active_field_work, open_shift
 import os
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from html import escape
 from secrets import compare_digest, token_urlsafe
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,11 +25,26 @@ def approved_session(request: Request):
         if not user or not user.is_active or request.session.get('credential_fingerprint','')!=fingerprint:
             request.session.clear()
             raise HTTPException(status_code=303,headers={'Location':'/login'})
+        from modules.auto_attendance import expire_attendance
+        expire_attendance(db)
+        db.commit()
         request.session['role']=user.role
         request.session['full_name']=user.full_name
         request.session['credential_fingerprint']=fingerprint
 
-app = FastAPI(dependencies=[Depends(approved_session)], title="ESONE")
+@asynccontextmanager
+async def lifespan(app):
+    from modules.auto_attendance import attendance_clock
+    clock = asyncio.create_task(attendance_clock())
+    try:
+        yield
+    finally:
+        clock.cancel()
+        with suppress(asyncio.CancelledError):
+            await clock
+
+
+app = FastAPI(dependencies=[Depends(approved_session)], title="ESONE", lifespan=lifespan)
 
 from modules.privacy import router as privacy_router
 app.include_router(privacy_router)

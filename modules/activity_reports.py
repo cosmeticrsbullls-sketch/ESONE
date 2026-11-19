@@ -50,12 +50,16 @@ def report_data(db,employee_id,first,last,with_links=False):
             if receipt:detail+=f' | Received INR {receipt.amount_received or 0}'
         rows.append([people.get(a.created_by or a.assigned_user_id,'Unassigned'),a.activity_type,c.business_name,a.status,local(a.created_at)+(' / '+local(a.completed_at) if a.completed_at else ''),detail])
         if with_links:rows[-1].append(f'/activities/{a.id}/share')
+    from modules.auto_attendance import auto_punch_ids
+    automatic = auto_punch_ids(db)
     punches=db.query(Attendance).filter(Attendance.punch_in_at>=lower,Attendance.punch_in_at<upper)
     if employee_id:punches=punches.filter_by(user_id=employee_id)
     for p in punches.order_by(Attendance.punch_in_at.desc()).all():
         detail=f'In GPS {p.in_latitude},{p.in_longitude} ({p.in_accuracy:.0f}m)'
-        if p.punch_out_at:detail+=f' | Out {local(p.punch_out_at)} GPS {p.out_latitude},{p.out_longitude}'
-        rows.append([people.get(p.user_id,''),'ATTENDANCE','', 'PUNCHED_OUT' if p.punch_out_at else 'PUNCH_OUT_PENDING',local(p.punch_in_at),detail])
+        if p.punch_out_at:
+            detail += f' | Out {local(p.punch_out_at)}'
+            detail += ' | Auto Punch Out (no checkout GPS)' if p.id in automatic else f' GPS {p.out_latitude},{p.out_longitude}'
+        rows.append([people.get(p.user_id,''),'ATTENDANCE','', 'AUTO_PUNCHED_OUT' if p.id in automatic else 'PUNCHED_OUT' if p.punch_out_at else 'PUNCH_OUT_PENDING',local(p.punch_in_at),detail])
         if with_links:rows[-1].append(f'/attendance/{p.id}/share')
     if with_links:headers.append("Share")
     return headers,rows

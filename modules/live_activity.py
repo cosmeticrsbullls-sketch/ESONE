@@ -144,6 +144,9 @@ def attendance_share(record_id:int,request:Request):
         p=db.get(Attendance,record_id)
         if not p or (request.session.get('role') not in MANAGEMENT and p.user_id!=request.session['user_id']):return HTMLResponse('Attendance not found',404)
         u=db.get(User,p.user_id)
-        rows=[['Employee',u.full_name],['Punch-in (UTC)',p.punch_in_at],['Punch-out (UTC)',p.punch_out_at or 'Pending'],['In GPS',f'{p.in_latitude}, {p.in_longitude}'],['Out GPS',f'{p.out_latitude}, {p.out_longitude}' if p.punch_out_at else '—']]
+        from modules.auto_attendance import auto_punch_ids
+        automatic = p.id in auto_punch_ids(db)
+        rows=[['Employee',u.full_name],['Punch-in (UTC)',p.punch_in_at],['Punch-out (UTC)',p.punch_out_at or 'Pending'],['In GPS',f'{p.in_latitude}, {p.in_longitude}'],['Out GPS','No checkout GPS (Auto Punch Out)' if automatic else f'{p.out_latitude}, {p.out_longitude}' if p.punch_out_at else '—']]
+        rows.append(['Punch-out method', 'Auto Punch Out' if automatic else 'Employee Punch Out' if p.punch_out_at else 'Pending'])
     if request.url.path.endswith('/pdf'):return pdf_response('Attendance',['Field','Value'],rows,filename=f'ESONE_attendance_{record_id}.pdf')
     return page('Attendance / Share',share_button(f'/attendance/{record_id}/pdf',f'ESONE_attendance_{record_id}.pdf')+SHARE_SCRIPT)

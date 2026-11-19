@@ -38,12 +38,12 @@ class HomeAttendanceTests(unittest.TestCase):
         self.login('b')
         self.assertEqual(self.label(),'Punch Out')
 
-    def test_older_unclosed_punch_still_requires_punch_out(self):
-        # Match the attendance endpoint: an overnight open shift must be closed.
+    def test_older_unclosed_punch_is_automatically_closed(self):
+        # The first authenticated request catches up an expired shift.
         with SessionLocal.begin() as db:
             db.add(Attendance(user_id=2,punch_in_at=now()-timedelta(days=1),in_latitude=23,in_longitude=72,in_accuracy=12))
         self.login('a')
-        self.assertEqual(self.label(),'Punch Out')
+        self.assertEqual(self.label(),'Punch In')
 
     def test_home_reads_do_not_create_attendance(self):
         self.login('a')

@@ -122,6 +122,7 @@ class DutyGateTests(unittest.TestCase):
         with SessionLocal.begin() as db:db.query(Attendance).filter_by(user_id=2).one().punch_in_at=now()-timedelta(days=1)
         self.assertEqual(self.client.post('/visits/create',data=dict(client_id=1,visit_type='SALES')).status_code,409)
         self.assertEqual(self.punch('OUT').status_code,409)
+        self.assertEqual(self.punch('IN').status_code,303)
         with patch.dict(os.environ,{'ESONE_REQUIRE_ACTIVITY_OTP':'false'}):
             html=self.client.get('/visits/6').text
             self.assertNotIn('<fieldset disabled',html)
@@ -133,7 +134,12 @@ class DutyGateTests(unittest.TestCase):
         self.login('a');self.duty()
         with SessionLocal.begin() as db:db.query(Attendance).one().punch_in_at=now()-timedelta(days=1)
         self.assertEqual(self.client.get('/field/nearby?latitude=23&longitude=72').status_code,409)
-        self.assertEqual(self.punch('OUT').status_code,303);self.assertEqual(self.punch('IN').status_code,303)
+        with SessionLocal() as db:
+            old = db.query(Attendance).one()
+            self.assertIsNotNone(old.punch_out_at)
+            self.assertIsNone(old.out_latitude)
+        self.assertIn('Auto Punch Out', self.client.get('/attendance').text)
+        self.assertEqual(self.punch('IN').status_code,303)
         self.assertEqual(self.client.get('/field/nearby?latitude=23&longitude=72').status_code,200)
 
     def test_reports_history_and_sharing_remain_available_off_duty(self):
