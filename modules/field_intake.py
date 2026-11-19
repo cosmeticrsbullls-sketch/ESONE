@@ -47,7 +47,7 @@ def intake(request):
 <h3 id="visit-form-title">Visit details</h3><p id="selected-business"></p>
 <fieldset id="field-registration" hidden disabled><legend>New business details</legend><div class="field-grid">
 <label>Business name * <input name="business_name" required maxlength="200"></label>
-<label>Business type <select name="client_type"><option value="SALON">Salon</option><option value="DISTRIBUTOR">Distributor</option><option value="ACADEMY">Academy</option><option value="OTHER">Other</option></select></label>
+<label>Business type <select name="client_type"><option value="SALON">Salon</option><option value="UNISEX">Unisex</option><option value="PARLOR">Parlor</option><option value="DISTRIBUTOR">Distributor</option><option value="ACADEMY">Academy</option><option value="OTHER">Other</option></select></label>
 <label>Owner / contact person <input name="contact_person" maxlength="150"></label>
 <label>Mobile * <input name="phone" type="tel" required maxlength="20"></label>
 <label>Area <input name="area" maxlength="120"></label><label>City <input name="city" maxlength="120"></label>
@@ -104,7 +104,7 @@ def start(request: Request, latitude: float=Form(...), longitude: float=Form(...
     if not valid_gps(latitude, longitude) or visit_type not in {'SALES', 'COURTESY', 'COLLECTION'} or not 16 <= len(submission) <= 80:
         return HTMLResponse('Invalid visit details.', 400)
     if client_id and not client_id.isdecimal(): return HTMLResponse('Select a valid registered business.', 400)
-    if not client_id and (not business_name.strip() or not phone.strip() or client_type not in {'SALON', 'DISTRIBUTOR', 'ACADEMY', 'OTHER'}):
+    if not client_id and (not business_name.strip() or not phone.strip() or client_type not in {'SALON', 'UNISEX', 'PARLOR', 'DISTRIBUTOR', 'ACADEMY', 'OTHER'}):
         return HTMLResponse('Business name, mobile and valid business type are required.', 400)
     if any(len(value)>limit for value,limit in [(business_name,200),(phone,20),(contact_person,150),(area,120),(city,120),(address,500),(pincode,12),(notes,4000)]):
         return HTMLResponse('Business details are too long.', 400)
