@@ -34,6 +34,8 @@ def attendance(request:Request,employee_id:int=0):
         if not manager or employee_id:query=query.filter_by(user_id=employee_id or request.session['user_id'])
         records=query.order_by(Attendance.id.desc()).limit(500 if manager else 31).all()
         people={u.id:u.full_name for u in db.query(User).all()}
+        from modules.auto_attendance import auto_punch_ids
+        automatic = auto_punch_ids(db)
         opened=db.query(Attendance).filter_by(user_id=request.session['user_id'],punch_out_at=None).first()
         options='<option value="0">All employees</option>'+''.join(f'<option value="{uid}" {"selected" if uid==employee_id else ""}>{escape(name)}</option>' for uid,name in people.items())
         filter_form=f'<form><label>Employee<select name="employee_id">{options}</select></label><button>Show Attendance</button></form>' if manager else ''
@@ -41,8 +43,8 @@ def attendance(request:Request,employee_id:int=0):
         blocked_message='<p role="status">Complete your active Visit or Demo before Punch Out.</p>' if blocked else ''
         disabled=' disabled aria-disabled="true"' if blocked else ''
         action='OUT' if opened else 'IN'
-        rows=''.join(f'<tr><td>{escape(people.get(r.user_id,''))}</td><td>{r.punch_in_at} UTC</td><td>{gps_link(r.in_latitude,r.in_longitude)} · {r.in_accuracy:.0f} m</td><td>{str(r.punch_out_at)+" UTC" if r.punch_out_at else "Pending punch out"}</td><td>{gps_link(r.out_latitude,r.out_longitude)}</td><td><a href="/attendance/{r.id}/share">Share</a></td></tr>' for r in records)
-    return page('Attendance',filter_form+blocked_message+f'<p>Actual punch times and GPS are recorded automatically.</p><form method="post" data-gps-form>{hidden(request)}<input type="hidden" name="action" value="{action}"><input type="hidden" name="latitude"><input type="hidden" name="longitude"><input type="hidden" name="accuracy"><button{disabled}>Punch {action.title()}</button><p role="status"></p></form><div class="table"><table><tr><th>Employee</th><th>Punch in</th><th>In GPS</th><th>Punch out</th><th>Out GPS</th><th>Share</th></tr>{rows}</table></div>'+GPS_SCRIPT)
+        rows=''.join(f'<tr><td>{escape(people.get(r.user_id,''))}</td><td>{r.punch_in_at} UTC</td><td>{gps_link(r.in_latitude,r.in_longitude)} · {r.in_accuracy:.0f} m</td><td>{str(r.punch_out_at)+" UTC"+(" · Auto Punch Out" if r.id in automatic else "") if r.punch_out_at else "Pending punch out"}</td><td>{gps_link(r.out_latitude,r.out_longitude)}</td><td><a href="/attendance/{r.id}/share">Share</a></td></tr>' for r in records)
+    return page('Attendance',filter_form+blocked_message+f'<p>Open attendance closes automatically at 11:59 PM (India time) on the Punch In day. Auto Punch Out is labelled in history and has no checkout GPS.</p><form method="post" data-gps-form>{hidden(request)}<input type="hidden" name="action" value="{action}"><input type="hidden" name="latitude"><input type="hidden" name="longitude"><input type="hidden" name="accuracy"><button{disabled}>Punch {action.title()}</button><p role="status"></p></form><div class="table"><table><tr><th>Employee</th><th>Punch in</th><th>In GPS</th><th>Punch out</th><th>Out GPS</th><th>Share</th></tr>{rows}</table></div>'+GPS_SCRIPT)
 
 @router.post('/attendance')
 def punch(request:Request,action:str=Form(...),latitude:float=Form(...),longitude:float=Form(...),accuracy:float=Form(...),csrf:str=Form('')):
@@ -53,6 +55,9 @@ def punch(request:Request,action:str=Form(...),latitude:float=Form(...),longitud
         db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
         opened=db.query(Attendance).filter_by(user_id=request.session['user_id'],punch_out_at=None).with_for_update().first()
         if action=='IN':
+            from modules.auto_attendance import day_cutoff
+            if now() >= day_cutoff(now()):
+                return HTMLResponse('The work day has closed. Punch In after midnight for the next day.', 409)
             if opened:return HTMLResponse('Punch out the open attendance first.',409)
             record=Attendance(user_id=request.session['user_id'],punch_in_at=now(),in_latitude=latitude,in_longitude=longitude,in_accuracy=accuracy);db.add(record);db.flush()
         else:
