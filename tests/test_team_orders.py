@@ -169,13 +169,51 @@ class TeamOrderTests(unittest.TestCase):
         self.client.get('/logout');self.login();self.assertIn('Employee',self.client.get('/activity-reports').text)
         self.assertTrue(self.client.get('/reports/pdf?kind=visits').content.startswith(b'%PDF'))
 
-    def test_sales_register_salon_returns_to_order_without_privilege_change(self):
-        self.punch_in_for_test(2,3)
-        self.login('a');d=self.form('/salons/new?return_to=/orders/new');d.update(business_name='New Salon',phone='1234567890',return_to='/orders/new')
-        r=self.client.post('/salons/new',data=d,follow_redirects=False);self.assertRegex(r.headers['location'],r'^/orders/new\?client_id=\d+$')
-        self.assertEqual(self.client.post('/salons/new',data=d,follow_redirects=False).headers['location'],r.headers['location'])
+    def test_business_registration_returns_home_and_is_shared(self):
+        self.punch_in_for_test(2, 3)
+        self.login('a')
+        self.assertIn('Add Business', self.client.get('/workspace').text)
+        form = self.form('/salons/new?return_to=/orders/new')
+        form.update(business_name='New Shared Salon', phone='9820012345',
+                    return_to='/orders/new', client_type='SALON')
+        response = self.client.post('/salons/new', data=form, headers={'Accept': 'application/json'})
+        self.assertEqual(response.json()['redirect'], '/workspace')
+        home = self.client.get('/workspace').text
+        self.assertIn('Business registered successfully: New Shared Salon', home)
+        self.assertNotIn('Business registered successfully', self.client.get('/workspace').text)
+        self.assertEqual(self.client.post('/salons/new', data=form).status_code, 409)
         from database.models import Client
-        with SessionLocal() as db:self.assertEqual(db.query(Client).filter_by(business_name='New Salon').count(),1)
+        with SessionLocal() as db:
+            self.assertEqual(db.query(Client).filter_by(business_name='New Shared Salon').count(), 1)
+        self.client.get('/logout')
+        self.login('b')
+        results = self.client.get('/business-search?q=shared').json()['matches']
+        self.assertEqual(results[0]['name'], 'New Shared Salon')
+        for url in ['/orders/new', '/demos/new', '/field/intake']:
+            self.assertIn('New Shared Salon' if url != '/field/intake' else 'Search registered entries',
+                          self.client.get(url).text)
+
+    def test_business_search_duplicate_normalization_and_csrf(self):
+        self.login()
+        form = self.form('/salons/new')
+        form.update(business_name='Normal Salon', phone='+91 98200 12345')
+        self.assertEqual(self.client.post('/salons/new', data={**form, 'csrf': 'wrong'}).status_code, 403)
+        self.assertEqual(self.client.post('/salons/new', data=form, follow_redirects=False).status_code, 303)
+        duplicate = {**form, 'business_name': 'Different Name', 'phone': '9820012345'}
+        self.assertEqual(self.client.post('/salons/new', data=duplicate).status_code, 409)
+        self.assertEqual(self.client.post('/salons/new', data={**form, 'business_name': ' normal   SALON ', 'phone': '5555555555'}).status_code, 409)
+        self.assertEqual(self.client.get('/business-search?q=982001').json()['matches'][0]['name'], 'Normal Salon')
+        self.assertEqual(self.client.get('/business-search?q=zzzzzz').json()['matches'], [])
+        self.assertEqual(self.client.get('/business-search?q=').json()['matches'], [])
+        self.assertEqual(self.client.post('/salons/new', data={**form, 'phone': ''}).status_code, 400)
+        from database.models import Client
+        with SessionLocal() as db:
+            client = db.query(Client).filter_by(business_name='Normal Salon').one()
+            client.status = 'INACTIVE'
+            db.commit()
+        self.assertFalse(self.client.get('/business-search?q=normal').json()['matches'][0]['active'])
+        self.assertEqual(self.client.post('/salons/new', data=form).status_code, 409)
+
 
 del OperationsTests
 
