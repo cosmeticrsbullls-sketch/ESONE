@@ -73,6 +73,7 @@
   add.addEventListener('click', () => {
     const query = search.value.trim();
     form.reset();
+    document.getElementById('business-gps-status').textContent = '';
     const phoneQuery = /^[+\d\s()-]+$/.test(query);
     form.elements.business_name.value = phoneQuery ? '' : query;
     form.elements.phone.value = phoneQuery ? query : '';
@@ -89,12 +90,39 @@
     saving = true;
     const button = form.querySelector('button[type=submit]');
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
+    let timeout;
     button.disabled = true;
     button.textContent = 'Saving…';
     search.disabled = true;
     error.hidden = true;
     try {
+      const gpsStatus = document.getElementById('business-gps-status');
+      form.elements.latitude.value = '';
+      form.elements.longitude.value = '';
+      form.elements.accuracy.value = '';
+      if (form.elements.at_location.checked) {
+        button.textContent = 'Getting GPS…';
+        gpsStatus.textContent = 'Capturing the actual business location…';
+        if (!navigator.geolocation) {
+          throw new Error('GPS is unavailable. Enable location access or leave the location option unchecked when registering from elsewhere.');
+        }
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve,
+            () => reject(new Error('Could not capture GPS. Allow location access, enable GPS and try again.')),
+            {enableHighAccuracy: true, timeout: 20000, maximumAge: 0});
+        });
+        if (!Number.isFinite(position.coords.accuracy) || position.coords.accuracy > 200) {
+          throw new Error('GPS is too inaccurate. Enable precise location and try again.');
+        }
+        form.elements.latitude.value = position.coords.latitude;
+        form.elements.longitude.value = position.coords.longitude;
+        form.elements.accuracy.value = position.coords.accuracy;
+        gpsStatus.textContent = 'GPS captured. Accuracy ' + Math.round(position.coords.accuracy) + ' m.';
+      } else {
+        gpsStatus.textContent = '';
+      }
+      button.textContent = 'Saving…';
+      timeout = setTimeout(() => controller.abort(), 20000);
       const response = await fetch(form.action, {
         method: 'POST', body: new FormData(form), signal: controller.signal,
         headers: {Accept: 'application/json'},
@@ -125,8 +153,8 @@
       }
       error.textContent = detail;
       error.hidden = false;
-    } catch {
-      error.textContent = 'Connection interrupted. Search for the business before retrying to check whether it was saved.';
+    } catch (failure) {
+      error.textContent = failure.message && failure.name !== 'AbortError' ? failure.message : 'Connection interrupted. Search for the business before retrying to check whether it was saved.';
       error.hidden = false;
     } finally {
       clearTimeout(timeout);
