@@ -4,7 +4,7 @@ import re
 import unittest
 from datetime import timedelta
 from unittest.mock import patch
-from tests.test_operations import OperationsTests
+from tests.test_operations import OperationsTests, historical_started_visit
 from database.db import SessionLocal
 from database.models import Activity, Attendance, AuditLog, Client, DemoBooking, SalesOrder, Visit
 from modules.workflows import now
@@ -35,36 +35,36 @@ class DutyGateTests(unittest.TestCase):
 
     def test_off_duty_cannot_check_in_lookup_or_use_legacy_start(self):
         self.login('a')
-        self.assertIn('CHECK IN VISIT — Punch In first',self.client.get('/field/intake').text)
+        self.assertIn('Find / Select Business — Punch In first',self.client.get('/field/intake').text)
         self.assertEqual(self.client.get('/field/nearby?latitude=23&longitude=72').status_code,409)
-        for endpoint,data in [('/field/start',dict(csrf=self.csrf,submission='a'*24,latitude=23,longitude=72,visit_type='SALES',business_name='No write',phone='555')),('/visits/create',dict(client_id=1,visit_type='SALES')),('/visits/6/start',dict(latitude=23,longitude=72))]:
+        for endpoint,data in [('/field/start',dict(csrf=self.csrf,submission='a'*24,latitude=23,longitude=72,visit_type='SALES',client_id='1'))]:
             response=self.client.post(endpoint,data=data);self.assertEqual(response.status_code,409,endpoint)
         with SessionLocal() as db:
             self.assertEqual(db.query(Activity).count(),6);self.assertEqual(db.query(Client).count(),3);self.assertEqual(db.query(AuditLog).count(),0)
 
-    def test_full_shift_visit_complete_home_then_punch_out(self):
+    def test_full_shift_single_form_visit_then_punch_out(self):
+        from tests.test_device_camera import photo_form
         self.login('a');self.assertEqual(self.punch('IN').status_code,303)
-        started=self.client.post('/field/start',data=self.field(),follow_redirects=False)
-        self.assertEqual(started.status_code,303);url=started.headers['location']
-        self.assertEqual(self.punch('OUT').status_code,409)
-        self.assertIn('disabled aria-disabled="true"',self.client.get('/attendance').text)
-        with patch.dict(os.environ,{'ESONE_REQUIRE_ACTIVITY_OTP':'false'}):
-            complete=self.client.post(url+'/complete',data=dict(csrf=self.csrf,notes='Test complete'),follow_redirects=False)
-        self.assertEqual(complete.headers['location'],'/workspace')
+        result=self.client.post('/field/start',data=photo_form(self))
+        self.assertEqual(result.status_code,200);self.assertEqual(result.json()['redirect'],'/workspace')
         self.assertEqual(self.punch('OUT').status_code,303)
         with SessionLocal() as db:
             self.assertIsNotNone(db.query(Attendance).one().punch_out_at)
-            self.assertEqual(db.get(Activity,int(url.split('/')[-1])).status,'COMPLETED')
+            self.assertEqual(db.query(Activity).order_by(Activity.id.desc()).first().status,'COMPLETED')
 
     def test_stale_open_form_cannot_create_business_after_punch_out(self):
-        self.login('a');self.duty();data=self.field('');data.update(business_name='Blocked New Salon',phone='9876543210')
+        self.login('a');self.duty();data=self.field('1')
         self.assertEqual(self.punch('OUT').status_code,303)
         self.assertEqual(self.client.post('/field/start',data=data).status_code,409)
         with SessionLocal() as db:self.assertEqual(db.query(Client).count(),3);self.assertEqual(db.query(Activity).count(),6)
 
     def test_admin_field_visit_still_requires_punch_in(self):
-        self.login();self.assertEqual(self.client.post('/visits/6/start',data=dict(latitude=23,longitude=72)).status_code,409)
-        self.duty(1);self.assertEqual(self.client.post('/visits/6/start',data=dict(latitude=23,longitude=72)).status_code,200)
+        from tests.test_device_camera import photo_form
+        self.login()
+        body=dict(csrf=self.csrf,client_id=1,latitude=23,longitude=72,accuracy=12)
+        self.assertEqual(self.client.post('/visit-camera/challenge',data=body).status_code,409)
+        self.duty(1)
+        self.assertEqual(self.client.post('/field/start',data=photo_form(self)).status_code,200)
 
     def test_off_duty_cannot_book_order_register_salon_or_book_demo(self):
         self.login('a')
@@ -118,9 +118,9 @@ class DutyGateTests(unittest.TestCase):
 
     def test_overnight_shift_can_finish_but_cannot_start_new_work(self):
         self.login('a');self.duty()
-        self.assertEqual(self.client.post('/visits/6/start',data=dict(latitude=23,longitude=72)).status_code,200)
+        historical_started_visit()
         with SessionLocal.begin() as db:db.query(Attendance).filter_by(user_id=2).one().punch_in_at=now()-timedelta(days=1)
-        self.assertEqual(self.client.post('/visits/create',data=dict(client_id=1,visit_type='SALES')).status_code,409)
+        self.assertEqual(self.client.post('/visits/create',data=dict(client_id=1,visit_type='SALES')).status_code,410)
         self.assertEqual(self.punch('OUT').status_code,409)
         self.assertEqual(self.punch('IN').status_code,303)
         with patch.dict(os.environ,{'ESONE_REQUIRE_ACTIVITY_OTP':'false'}):
@@ -150,7 +150,7 @@ class DutyGateTests(unittest.TestCase):
         self.assertIn('class="share-pdf"',html)
 
     def test_ended_attendance_cannot_complete_existing_visit_directly(self):
-        self.login('a');self.duty();self.client.post('/visits/6/start',data=dict(latitude=23,longitude=72))
+        self.login('a');self.duty();historical_started_visit()
         with SessionLocal.begin() as db:db.query(Attendance).one().punch_out_at=now()
         with patch.dict(os.environ,{'ESONE_REQUIRE_ACTIVITY_OTP':'false'}):
             self.assertEqual(self.client.post('/visits/6/complete',data=dict(csrf=self.csrf,notes='Bypass')).status_code,409)

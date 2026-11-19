@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Float, Text, Numeric, func
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Float, Text, Numeric, func, UniqueConstraint
 from database.db import Base
 
 class User(Base):
@@ -137,3 +137,45 @@ class NotificationRead(Base):
     __tablename__='notification_reads'
     user_id=Column(Integer,ForeignKey('users.id'),primary_key=True)
     read_at=Column(DateTime,nullable=False)
+
+class EmployeeDevice(Base):
+    __tablename__ = 'employee_devices'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, index=True)
+    label = Column(String(250), nullable=False)
+    status = Column(String(20), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False)
+    reviewed_at = Column(DateTime)
+    reviewed_by = Column(Integer, ForeignKey('users.id'))
+    __table_args__ = (UniqueConstraint('user_id','token_hash'),)
+
+class VisitCameraChallenge(Base):
+    __tablename__ = 'visit_camera_challenges'
+    id = Column(Integer, primary_key=True)
+    token_hash = Column(String(64), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    device_id = Column(Integer, ForeignKey('employee_devices.id'), nullable=False)
+    client_id = Column(Integer, ForeignKey('clients.id'), nullable=False)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    accuracy = Column(Float, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime)
+
+class VisitPhoto(Base):
+    __tablename__ = 'visit_photos'
+    id = Column(Integer, primary_key=True)
+    activity_id = Column(Integer, ForeignKey('activities.id'), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    device_id = Column(Integer, ForeignKey('employee_devices.id'), nullable=False)
+    client_id = Column(Integer, ForeignKey('clients.id'), nullable=False)
+    challenge_id = Column(Integer, ForeignKey('visit_camera_challenges.id'), unique=True, nullable=False)
+    captured_at = Column(DateTime, nullable=False)
+    received_at = Column(DateTime, nullable=False)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    accuracy = Column(Float, nullable=False)
+    digest = Column(String(64), unique=True, nullable=False)
+    jpeg = Column(LargeBinary, nullable=False)

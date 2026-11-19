@@ -50,6 +50,12 @@ def team_data(db):
             a=active[0];v=visits.get(a.id);label=(v.visit_type.title()+' Visit' if v else a.activity_type.replace('_',' ').title())+' in progress'
             if len(active)>1:label+=f' (+{len(active)-1} more)'
             salon=salons[a.client_id].business_name if a.client_id in salons else 'Unknown salon';activity_id=a.id
+        elif on_duty and completed:
+            last=max(completed,key=lambda item:(item.completed_at,item.id))
+            if lower<=last.completed_at<upper and last.source=='FIELD_FORM':
+                label='Last recorded: '+visits[last.id].visit_type.title()+' visit'
+                salon=salons[last.client_id].business_name if last.client_id in salons else 'Unknown salon'
+                activity_id=last.id
         samples=[]
         def add(stamp,lat,lon,source):
             if stamp and gps(lat,lon):samples.append((stamp,lat,lon,source))
@@ -58,7 +64,7 @@ def team_data(db):
             add(attendance.punch_out_at,attendance.out_latitude,attendance.out_longitude,'Punch-out')
         for a in owned:
             if a.id in visits:
-                v=visits[a.id];add(v.check_in_at,v.check_in_latitude,v.check_in_longitude,'Visit check-in');add(v.check_out_at,v.check_out_latitude,v.check_out_longitude,'Visit checkout')
+                v=visits[a.id];add(v.check_in_at,v.check_in_latitude,v.check_in_longitude,'Visit recorded' if a.source=='FIELD_FORM' else 'Visit check-in');add(v.check_out_at,v.check_out_latitude,v.check_out_longitude,'Visit checkout')
             if a.id in demos:
                 d=demos[a.id];add(d.started_at,d.execution_latitude,d.execution_longitude,'Demo execution')
         latest=max(samples,key=lambda s:s[0]) if samples else None
@@ -111,7 +117,11 @@ def activity_share(activity_id:int,request:Request):
         a=db.get(Activity,activity_id)
         if not a or not permitted(request,a,db):return HTMLResponse('Activity not found',404)
         c=db.get(Client,a.client_id)
+        from database.models import VisitPhoto
+        evidence=db.query(VisitPhoto).filter_by(activity_id=a.id).first()
         content=f'<h2>{escape(a.activity_type)} · {escape(c.business_name if c else "")}</h2><p>{escape(a.status)}</p><p>{escape(a.notes or "")}</p>'
+        if evidence:
+            content+=f'<h3>Salon photo</h3><p>Recorded (UTC): {evidence.received_at} · GPS accuracy: {evidence.accuracy:.0f} m · Device #{evidence.device_id}</p><a href="/activities/{a.id}/photo" target="_blank" rel="noopener"><img src="/activities/{a.id}/photo" alt="Salon visit photo" style="max-width:480px;width:100%"></a>'
     return page('Activity Details / Share',content+share_button(f'/activities/{activity_id}/pdf',f'ESONE_activity_{activity_id}.pdf')+SHARE_SCRIPT)
 
 @router.get('/activities/{activity_id}/pdf')
@@ -127,7 +137,10 @@ def activity_pdf(activity_id:int,request:Request):
         c=db.get(Client,a.client_id);u=db.get(User,a.assigned_user_id or a.created_by) if (a.assigned_user_id or a.created_by) else None
         rows=[['Activity',a.activity_type],['Employee',u.full_name if u else 'Unassigned'],['Salon',c.business_name if c else ''],['Status',a.status],['Created (UTC)',a.created_at],['Completed (UTC)',a.completed_at],['Notes',a.notes or '']]
         v=db.query(Visit).filter_by(activity_id=a.id).first()
-        if v:rows.extend([['Visit type',v.visit_type],['Check-in (UTC)',v.check_in_at],['Check-out (UTC)',v.check_out_at]])
+        if v:
+            rows.append(['Visit type',v.visit_type])
+            if a.source=='FIELD_FORM': rows.append(['Visit recorded (UTC)',a.completed_at])
+            else: rows.extend([['Check-in (UTC)',v.check_in_at],['Check-out (UTC)',v.check_out_at]])
         d=db.query(DemoBooking).filter_by(activity_id=a.id).first()
         if d:rows.extend([['Treatment',d.product_or_treatment],['Scheduled (India)',d.demo_date],['Result',d.conversion_status]])
         collection=db.query(CollectionActivity).filter_by(activity_id=a.id).first()

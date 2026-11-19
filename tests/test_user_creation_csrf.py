@@ -58,6 +58,10 @@ class UserCreationCsrfTests(unittest.TestCase):
         self.admin()
         own = self.form_token()
         with TestClient(app) as other:
+            # Separate session in the same approved browser; another browser
+            # would correctly revoke this Super Admin browser at bootstrap.
+            from modules.device_access import COOKIE
+            other.cookies.set(COOKIE,self.client.cookies.get(COOKIE))
             self.assertEqual(other.post('/login', data={'email':'manager@example.test','password':'Test-only-password-123'}, follow_redirects=False).status_code, 303)
             foreign = self.form_token(other)
         self.assertNotEqual(own, foreign)

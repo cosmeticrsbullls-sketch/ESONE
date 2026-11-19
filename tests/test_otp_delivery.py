@@ -3,7 +3,7 @@ import os
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
-from tests.test_operations import OperationsTests
+from tests.test_operations import OperationsTests, historical_started_visit
 from database.db import SessionLocal
 from database.models import Activity, CommunicationLog, VerificationOTP
 from modules import otp_delivery
@@ -24,7 +24,7 @@ class OtpTests(unittest.TestCase):
 
     def begin_visit(self):
         self.login('a')
-        self.assertEqual(self.client.post('/visits/6/start',data={'latitude':23,'longitude':72}).status_code,200)
+        historical_started_visit()
         return {'notes':'Meeting complete','csrf':self.csrf}
 
     def test_paused_otp_completes_only_owned_started_visit(self):

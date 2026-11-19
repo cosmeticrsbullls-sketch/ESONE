@@ -25,6 +25,11 @@ def approved_session(request: Request):
         if not user or not user.is_active or request.session.get('credential_fingerprint','')!=fingerprint:
             request.session.clear()
             raise HTTPException(status_code=303,headers={'Location':'/login'})
+        from modules.device_access import current_device
+        if request.url.path not in {'/login','/logout','/','/device-access','/device-access/request'} and not request.url.path.startswith(('/assets/','/static/')):
+            device=current_device(db,request)
+            if not device or device.status!='APPROVED':
+                raise HTTPException(status_code=303,headers={'Location':'/device-access'})
         from modules.auto_attendance import expire_attendance
         expire_attendance(db)
         db.commit()
@@ -48,6 +53,10 @@ app = FastAPI(dependencies=[Depends(approved_session)], title="ESONE", lifespan=
 
 from modules.privacy import router as privacy_router
 app.include_router(privacy_router)
+from modules.device_access import router as device_router
+from modules.visit_camera import router as camera_router
+app.include_router(device_router)
+app.include_router(camera_router)
 
 app.add_middleware(
     SessionMiddleware,
@@ -245,7 +254,12 @@ def login(
         import hashlib
         request.session["credential_fingerprint"] = hashlib.sha256(user.password_hash.encode()).hexdigest()
 
-        return RedirectResponse("/workspace", status_code=303)
+        from modules.device_access import enroll, cookie
+        db.query(User).filter_by(id=user.id).with_for_update().one()
+        device, raw = enroll(db, request, user)
+        destination = '/workspace' if device.status == 'APPROVED' else '/device-access'
+        db.commit()
+        return cookie(RedirectResponse(destination, status_code=303), raw)
 
     finally:
         db.close()
@@ -262,7 +276,7 @@ def command_center(request: Request):
     summary = ""
     if role in {"SUPER_ADMIN", "MANAGEMENT", "OFFICE"}:
         from modules.operations import queues
-        from database.models import DemoBooking, DemoBookingRequest, Activity
+        from database.models import DemoBooking, DemoBookingRequest, Activity, EmployeeDevice
         with SessionLocal() as db:
             courtesy_count = len(queues(db, "courtesy")[1])
             ptp_rows = queues(db, "ptp")[1]
@@ -270,6 +284,7 @@ def command_center(request: Request):
             overdue_count = sum(row[6] == "OVERDUE" for row in ptp_rows)
             demo_count = db.query(DemoBooking).join(Activity, Activity.id == DemoBooking.activity_id).filter(Activity.status.in_(["BOOKED", "IN_PROGRESS"])).count()
             pending_demos = db.query(DemoBookingRequest).filter_by(status="PENDING").count()
+            pending_devices = db.query(EmployeeDevice).filter_by(status="PENDING").count()
         from modules.ui import icon
         metrics = [
             ("Courtesy calls due", courtesy_count, "/operations?kind=courtesy", "Salons ready for a follow-up"),
@@ -277,6 +292,7 @@ def command_center(request: Request):
             ("PTP overdue", overdue_count, "/operations?kind=ptp", "Promises needing attention"),
             ("Active demos", demo_count, "/demos", "Booked or in progress"),
             ("Demo Booking Approvals", pending_demos, "/command-center/demo-requests", "Requests awaiting review"),
+            ("Device Approvals", pending_devices, "/command-center/devices", "Browsers awaiting employee verification"),
         ]
         summary = '<section class="metrics" aria-label="Today’s work">' + ''.join(
             f'<a class="metric" href="{url}"><div class="metric-label">{label}: <strong>{count}</strong></div><div class="number" aria-hidden="true">{count}</div><div class="hint">{hint} →</div></a>' for label,count,url,hint in metrics) + '</section>'
@@ -289,6 +305,7 @@ def command_center(request: Request):
              ("reports", "Reports & Follow-ups", "Courtesy queues, PTPs and filtered Excel exports.", "/operations")]
     cards += [("clients", "Employee Master", "Basic employee details and profiles.", "/employees"),("reports", "Employee Activity Reports", "Daily/monthly activities and PDF WhatsApp sharing.", "/activity-reports"),("reports", "Notifications / Messages", "Today’s activity, new demos/orders and pending reminders.", "/notifications"),("reports", "Orders", "Order bookings and WhatsApp confirmation.", "/orders"),("visits", "Attendance", "GPS punch in/out and map evidence.", "/attendance")]
     if role in {"SUPER_ADMIN", "MANAGEMENT", "OFFICE"}:
+        cards.insert(0,("clients", "Device Approvals", "Review employee browser requests and revoke lost devices.", "/command-center/devices"))
         cards.insert(0,("reports", "Generate Sales Bill", "GST: Shivam Export · Non-GST: Shivam Cosmetics. Create from sales order or directly.", "/billing"))
         cards.insert(0,("visits", "Live Activity", "Team activity, visit counters and last known GPS locations.", "/live-activity"))
     from modules.notifications import inbox_card
@@ -1014,19 +1031,8 @@ def visits_page(request: Request):
     finally: db.close()
 
 @app.post("/visits/create")
-def create_visit(request:Request, client_id:int=Form(...), visit_type:str=Form(...)):
-    if not request.session.get("user_id"): return RedirectResponse("/",303)
-    db=SessionLocal()
-    try:
-        denied=require_duty(db, request)
-        if denied is not None:return denied
-        if not _visit_access(request):return HTMLResponse("Access Denied",403)
-        if visit_type.upper() not in {"SALES","COURTESY","COLLECTION"}:return HTMLResponse("Invalid visit type",400)
-        if not db.get(Client,client_id):return HTMLResponse("Client not found",404)
-        a=Activity(client_id=client_id,activity_type="FIELD_VISIT",source="FIELD",status="CREATED",title=f"{visit_type.upper()} Visit",assigned_user_id=request.session.get("user_id"),created_by=request.session.get("user_id"))
-        db.add(a); db.flush(); v=Visit(activity_id=a.id,visit_type=visit_type.upper()); db.add(v); db.commit()
-        return RedirectResponse(f"/visits/{a.id}",303)
-    finally: db.close()
+def create_visit(request:Request):
+    return HTMLResponse('Separate visit creation is retired. Use Add Visit, fill the form and Finish.',410)
 
 @app.get("/visits/{activity_id}", response_class=HTMLResponse)
 def visit_detail(activity_id:int, request:Request):
@@ -1038,7 +1044,10 @@ def visit_detail(activity_id:int, request:Request):
         a,v,c=row
         if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
         gps_registered=c.latitude is not None and c.longitude is not None
-        start_block='''<button onclick="startVisit()">VERIFY LOCATION & START VISIT</button><div id="geo"></div>''' if a.status=="CREATED" else ""
+        start_block=f'<a class="primary" href="/field/intake?visit_type={v.visit_type}">Add Visit</a><p>Use Add Visit to record the completed visit in one form.</p>' if a.status=="CREATED" else ""
+        from database.models import VisitPhoto
+        if db.query(VisitPhoto).filter_by(activity_id=activity_id).first():
+            start_block+=f'<p><a href="/activities/{activity_id}/photo" target="_blank" rel="noopener">View salon photo</a></p>'
         from modules.workflows import hidden
         csrf_field=hidden(request)
         end_block='''<form method="post" action="/visits/%s/request-end-otp">%s<label>Outcome / Notes</label><input name="notes" style="width:100%%;padding:12px;margin:8px 0" required><button>SEND END OTP</button></form>'''%(activity_id,csrf_field) if a.status=="IN_PROGRESS" else ""
@@ -1051,36 +1060,18 @@ def visit_detail(activity_id:int, request:Request):
         from modules.live_activity import share_button, SHARE_SCRIPT
         end_block += share_button(f"/activities/{activity_id}/pdf",f"ESONE_visit_{activity_id}.pdf")+SHARE_SCRIPT
         from modules.enhancements import map_link
-        maps = '<p>' + ' · '.join(map_link(label,lat,lon) for label,lat,lon in [('Salon on Google Maps',c.latitude,c.longitude),('Check-in on Google Maps',v.check_in_latitude,v.check_in_longitude),('Check-out on Google Maps',v.check_out_latitude,v.check_out_longitude)] if lat is not None and lon is not None) + '</p>'
+        maps = '<p>' + ' · '.join(map_link(label,lat,lon) for label,lat,lon in [('Salon on Google Maps',c.latitude,c.longitude),('Visit location on Google Maps' if a.source=='FIELD_FORM' else 'Check-in on Google Maps',v.check_in_latitude,v.check_in_longitude),('Check-out on Google Maps',v.check_out_latitude,v.check_out_longitude)] if lat is not None and lon is not None) + '</p>'
         if request.session.get('role') in {'SUPER_ADMIN','MANAGEMENT','OFFICE'} and a.status == 'IN_PROGRESS':
             end_block += f'<form method="post" action="/visits/{activity_id}/management-close">{csrf_field}<h3>Command Center closure</h3><label>Reason for closing without customer OTP</label><textarea name="reason" minlength="10" maxlength="2000" required></textarea><button>Close visit with audit record</button></form>'
-        register_note="Salon GPS not registered. Current verified location will be registered when visit starts." if not gps_registered else f"Registered GPS: {c.latitude:.5f}, {c.longitude:.5f} (allowed radius {VISIT_RADIUS_METERS}m)"
+        register_note="Salon GPS not registered. Current GPS will be registered when the visit is saved." if not gps_registered else f"Registered GPS: {c.latitude:.5f}, {c.longitude:.5f} (allowed radius {VISIT_RADIUS_METERS}m)"
         return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Visit</title><style>body{{font-family:Arial;background:#f4f4f4;margin:0}}main{{max-width:650px;margin:auto;padding:22px}}.card{{background:#fff;padding:22px;border:1px solid #ddd;border-radius:14px}}button,input{{padding:13px;border-radius:8px;border:1px solid #bbb;margin:6px 0}}button{{background:#222;color:white;font-weight:bold}}.ok{{color:green}}</style></head><body><main><a href="/visits">← Visits</a><div class="card"><h2>{escape(str(v.visit_type))} VISIT</h2><h3>{escape(str(c.business_name))}</h3><p>Status: <b>{escape(str(a.status))}</b></p><p>Location: {register_note}</p>{maps}{start_block}{end_block}{otp_block}</div></main>
-<script>function startVisit(){{if(!navigator.geolocation){{alert('GPS not supported');return}};document.getElementById('geo').innerText='Getting location...';navigator.geolocation.getCurrentPosition(async p=>{{let f=new FormData();f.append('latitude',p.coords.latitude);f.append('longitude',p.coords.longitude);let r=await fetch('/visits/{activity_id}/start',{{method:'POST',body:f}});let t=await r.text();if(r.ok)location.reload();else document.getElementById('geo').innerHTML=t;}},e=>{{document.getElementById('geo').innerText='Location permission/GPS required: '+e.message}},{{enableHighAccuracy:true,timeout:15000}})}};</script></body></html>'''
+</body></html>'''
     finally: db.close()
 
 @app.post("/visits/{activity_id}/start")
-def start_visit(activity_id:int,request:Request,latitude:float=Form(...),longitude:float=Form(...)):
-    if not request.session.get("user_id"): return HTMLResponse("Login required",401)
-    db=SessionLocal()
-    try:
-        denied=require_duty(db, request)
-        if denied is not None:return denied
-        a=db.query(Activity).filter(Activity.id==activity_id).first(); v=db.query(Visit).filter(Visit.activity_id==activity_id).first()
-        if not a or not v:return HTMLResponse("Visit not found",404)
-        if not _owns_visit(request,a):return HTMLResponse("Access Denied",403)
-        if a.status != "CREATED":return HTMLResponse("Visit has already started or completed",409)
-        if not (math.isfinite(latitude) and math.isfinite(longitude) and -90<=latitude<=90 and -180<=longitude<=180):return HTMLResponse("Invalid GPS coordinates",400)
-        c=db.query(Client).filter(Client.id==a.client_id).first()
-        if not c:return HTMLResponse("Client not found",404)
-        if c.latitude is None or c.longitude is None:
-            c.latitude,c.longitude=latitude,longitude; dist=0
-        else:
-            dist=_distance_m(latitude,longitude,c.latitude,c.longitude)
-            if dist>VISIT_RADIUS_METERS:return HTMLResponse(f"Location mismatch: approx {dist:.0f}m from registered salon location. Visit cannot start.",409)
-        v.check_in_latitude=latitude;v.check_in_longitude=longitude;v.check_in_at=datetime.now();a.status="IN_PROGRESS"
-        db.add(AuditLog(user_id=request.session.get("user_id"),entity_type="VISIT",entity_id=v.id,action="START",new_value=f"distance_m={dist:.1f}"));db.commit();return HTMLResponse("OK")
-    finally:db.close()
+def start_visit(activity_id:int,request:Request):
+    return HTMLResponse('Separate visit start is retired. Use Add Visit, fill the form and Finish.',410)
+
 
 def _visit_csrf(request, csrf):
     if not csrf or not secrets.compare_digest(csrf, request.session.get("workflow_csrf", "")):
@@ -1257,8 +1248,11 @@ async def esone_presentation(request: Request, call_next):
     from fastapi.responses import Response
     headers = dict(response.headers)
     headers.pop("content-length", None)
-    return Response(document, status_code=response.status_code, headers=headers,
-                    background=response.background)
+    outgoing = Response(document, status_code=response.status_code, headers=headers,
+                        background=response.background)
+    outgoing.raw_headers = [(key,value) for key,value in outgoing.raw_headers if key.lower()!=b'set-cookie']
+    outgoing.raw_headers.extend((key,value) for key,value in response.raw_headers if key.lower()==b'set-cookie')
+    return outgoing
 
 
 @app.get("/assets/earthshine-logo.png", include_in_schema=False)
