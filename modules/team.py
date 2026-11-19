@@ -160,6 +160,7 @@ def salon_new(request: Request, return_to: str = ''):
       .business-registration .business-results small {{display:block}}
       .business-registration label {{display:block;margin:16px 0}}
       .business-registration input,.business-registration select {{width:100%;max-width:100%}}
+      .business-registration input[type="checkbox"] {{width:auto}}
       .business-registration .notice {{padding:12px;background:#fff7e5;border-radius:8px}}
     </style>
     <div class="business-registration">
@@ -179,7 +180,10 @@ def salon_new(request: Request, return_to: str = ''):
         {hidden(request)}
         <label>Business name<input name="business_name" maxlength="200" required></label>
         <label>Mobile number<input name="phone" type="tel" maxlength="20" required></label>
-        <label>Business type<select name="client_type"><option value="SALON">Salon</option><option value="DISTRIBUTOR">Distributor</option><option value="ACADEMY">Academy</option><option value="OTHER">Other</option></select></label>
+        <label>Business type<select name="client_type"><option value="SALON">Salon</option><option value="UNISEX">Unisex</option><option value="PARLOR">Parlor</option><option value="DISTRIBUTOR">Distributor</option><option value="ACADEMY">Academy</option><option value="OTHER">Other</option></select></label>
+        <label><input type="checkbox" name="at_location" value="yes" id="business-at-location"> I am at the actual business location. Capture GPS when saving.</label>
+        <input type="hidden" name="latitude"><input type="hidden" name="longitude"><input type="hidden" name="accuracy">
+        <p id="business-gps-status" role="status" aria-live="polite"></p>
         <details><summary>Additional details (optional)</summary>
           <label>Contact person<input name="contact_person" maxlength="150"></label>
           <label>Area<input name="area" maxlength="120"></label>
@@ -189,11 +193,11 @@ def salon_new(request: Request, return_to: str = ''):
         <p id="registration-error" role="alert" hidden></p>
         <button type="submit">Save Business</button>
       </form>
-      <p>GPS is captured when an employee checks in for a visit.</p>
+      <p>Registering from elsewhere? Leave the location option unchecked. GPS can be recorded at the first visit.</p>
       <p><a href="/workspace">Home</a></p>
       <noscript>Enable JavaScript to search and register a business.</noscript>
     </div>
-    <script src="/business-registration.js?v=1" defer></script>'''
+    <script src="/business-registration.js?v=2" defer></script>'''
     return HTMLResponse(page('Add Business', content), headers={'Cache-Control': 'no-store'})
 
 
@@ -219,10 +223,21 @@ async def salon_create(request: Request):
     values = {key: str(form.get(key, '')).strip() for key in fields}
     client_type = str(form.get('client_type', 'SALON'))
     invalid = (not values['business_name'] or not business_phone(values['phone'])
-               or client_type not in {'SALON', 'DISTRIBUTOR', 'ACADEMY', 'OTHER'}
+               or client_type not in {'SALON', 'UNISEX', 'PARLOR', 'DISTRIBUTOR', 'ACADEMY', 'OTHER'}
                or any(len(values[key]) > limit for key, limit in fields.items()))
     if invalid:
         return JSONResponse({'detail': 'Enter a business name, mobile number and valid business type.'}, status_code=400)
+    at_location = str(form.get('at_location', '')) == 'yes'
+    latitude = longitude = accuracy = None
+    if at_location:
+        try:
+            latitude = float(form.get('latitude', ''))
+            longitude = float(form.get('longitude', ''))
+            accuracy = float(form.get('accuracy', ''))
+        except (TypeError, ValueError):
+            return JSONResponse({'detail': 'Capture GPS at the actual business location before saving.'}, status_code=400)
+        if not valid_gps(latitude, longitude) or not math.isfinite(accuracy) or not 0 <= accuracy <= 200:
+            return JSONResponse({'detail': 'GPS is invalid or too inaccurate. Enable precise location and try again.'}, status_code=400)
     from database.models import Client
     with SessionLocal.begin() as db:
         # All registration paths acquire user locks in the same order.
@@ -243,12 +258,17 @@ async def salon_create(request: Request):
                              'active': c.status != 'INACTIVE'} for c in matches[:20]],
             }, status_code=409)
         client = Client(
-            **values, client_type=client_type, created_by=request.session['user_id'],
+            **values, client_type=client_type, latitude=latitude, longitude=longitude, created_by=request.session['user_id'],
             assigned_sales_id=request.session['user_id'] if request.session['role'] == 'SALES' else None,
         )
         db.add(client)
         db.flush()
         audit(db, request, 'Client', client.id, 'SALON_REGISTERED')
+        if at_location:
+            import json
+            audit(db, request, 'Client', client.id, 'GPS_REGISTERED',
+                  new=json.dumps({'latitude': latitude, 'longitude': longitude, 'accuracy_m': accuracy}))
+
         label = client.business_name
     request.session['business_registration_notice'] = (
         f'Business registered successfully: {label}. Select it when starting an activity.'
