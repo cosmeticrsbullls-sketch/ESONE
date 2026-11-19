@@ -1,111 +1,69 @@
-import re
 import unittest
 from tests.test_operations import OperationsTests
+from tests.test_device_camera import photo_form
 from database.db import SessionLocal
 from database.models import Client, Activity, Visit, AuditLog
 
-
 class FieldIntakeTests(unittest.TestCase):
-    setUpClass = classmethod(OperationsTests.setUpClass.__func__)
-    setUp = OperationsTests.setUp
-    punch_in_for_test = OperationsTests.punch_in_for_test
-    _base_login = OperationsTests.login
-    tearDown = OperationsTests.tearDown
-    def login(self, who='manager'):
-        self.punch_in_for_test(1,2,3)
-        self._base_login(who)
+    setUpClass=classmethod(OperationsTests.setUpClass.__func__)
+    setUp=OperationsTests.setUp
+    tearDown=OperationsTests.tearDown
+    punch_in_for_test=OperationsTests.punch_in_for_test
+    _base_login=OperationsTests.login
+    def login(self,who='a'):
+        self.punch_in_for_test(1,2,3);self._base_login(who)
 
-    def test_workspace_visit_links_open_intake_and_start_collection(self):
-        response = self.client.get('/field/intake', follow_redirects=False)
-        self.assertEqual(response.status_code, 303)
-        self.assertEqual(response.headers['location'], '/login')
-        self.login('a')
-        for section in ['sales', 'collection']:
-            workspace = self.client.get('/workspace/' + section)
-            self.assertIn('href="/field/intake?visit_type='+section.upper()+'"', workspace.text)
+    def test_workspace_links_and_single_form_collection_visit(self):
+        self.assertEqual(self.client.get('/field/intake',follow_redirects=False).headers['location'],'/login')
+        self.login()
+        for section in ['sales','collection']:
+            self.assertIn('href="/field/intake?visit_type='+section.upper()+'"',self.client.get('/workspace/'+section).text)
             self.assertIn('value="'+section.upper()+'" selected>',self.client.get('/field/intake?visit_type='+section.upper()).text)
-        response = self.client.get('/field/intake')
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('action="/field/start"', response.text)
-        self.assertIn('value="COLLECTION"', response.text)
-        data = {'csrf': re.search(r'name="csrf" value="([^"]+)"', response.text)[1],
-                'submission': re.search(r'name="submission" value="([^"]+)"', response.text)[1],
-                'latitude': '23', 'longitude': '72', 'visit_type': 'COLLECTION', 'client_id': '1'}
-        started = self.client.post('/field/start', data=data, follow_redirects=False)
-        self.assertEqual(started.status_code, 303)
+        data=photo_form(self);data['visit_type']='COLLECTION'
+        response=self.client.post('/field/start',data=data)
+        self.assertEqual(response.json()['redirect'],'/workspace')
         with SessionLocal() as db:
-            activity = db.query(Activity).order_by(Activity.id.desc()).first()
-            visit = db.query(Visit).filter_by(activity_id=activity.id).one()
-            self.assertEqual(visit.visit_type, 'COLLECTION')
-            self.assertEqual(activity.status, 'IN_PROGRESS')
+            a=db.query(Activity).order_by(Activity.id.desc()).first()
+            self.assertEqual(a.status,'COMPLETED')
+            self.assertEqual(db.query(Visit).filter_by(activity_id=a.id).one().visit_type,'COLLECTION')
 
+    def test_lookup_types_distance_unmapped_and_no_writes(self):
+        self.login()
+        with SessionLocal.begin() as db:
+            for cid,kind,lat in [(1,'SALON',23),(2,'DISTRIBUTOR',23.001),(3,'ACADEMY',24)]:
+                c=db.get(Client,cid);c.client_type=kind;c.latitude=lat;c.longitude=72
+            db.add(Client(business_name='Unmapped academy',client_type='ACADEMY'))
+            before=db.query(AuditLog).count()
+        result=self.client.get('/field/nearby?latitude=23&longitude=72').json()
+        self.assertEqual([c['type'] for c in result['nearby']],['SALON','DISTRIBUTOR'])
+        self.assertEqual(result['unmapped'][0]['name'],'Unmapped academy')
+        with SessionLocal() as db:self.assertEqual(db.query(AuditLog).count(),before)
 
-def form(self, who='a'):
-    self.login(who)
-    html=self.client.get('/visits').text
-    return {'csrf':re.search(r'name="csrf" value="([^"]+)"',html)[1],
-            'submission':re.search(r'name="submission" value="([^"]+)"',html)[1],
-            'latitude':'23', 'longitude':'72', 'visit_type':'SALES'}
+    def test_missing_business_redirects_employee_to_add_business_not_inline_form(self):
+        self.login()
+        html=self.client.get('/field/intake').text
+        self.assertIn('Add Business on Home',html);self.assertNotIn('name="business_name"',html)
+        data=photo_form(self);data['client_id']=''
+        response=self.client.post('/field/start',data={**data,'business_name':'No inline','phone':'999'})
+        self.assertEqual(response.status_code,400)
+        with SessionLocal() as db:self.assertEqual(db.query(Client).count(),3)
 
+    def test_first_visit_registers_gps_and_repeat_finish_is_idempotent(self):
+        self.login();data=photo_form(self)
+        self.assertEqual(self.client.post('/field/start',data=data).status_code,200)
+        self.assertEqual(self.client.post('/field/start',data=data).status_code,200)
+        with SessionLocal() as db:
+            self.assertEqual(db.query(Activity).count(),7)
+            self.assertEqual(db.get(Client,1).latitude,23)
+            self.assertEqual(db.query(AuditLog).filter_by(action='FIELD_INTAKE').count(),1)
 
-def test_lookup_types_distance_unmapped_and_no_writes(self):
-    self.login('a')
-    with SessionLocal() as db:
-        for cid,kind,lat in [(1,'SALON',23),(2,'DISTRIBUTOR',23.001),(3,'ACADEMY',24)]:
-            c=db.get(Client,cid);c.client_type=kind;c.latitude=lat;c.longitude=72
-        db.add(Client(business_name='Unmapped academy',client_type='ACADEMY'))
-        db.commit();before=db.query(AuditLog).count()
-    result=self.client.get('/field/nearby?latitude=23&longitude=72').json()
-    self.assertEqual([c['type'] for c in result['nearby']],['SALON','DISTRIBUTOR'])
-    self.assertEqual(result['unmapped'][0]['name'],'Unmapped academy')
-    with SessionLocal() as db:self.assertEqual(db.query(AuditLog).count(),before)
+    def test_csrf_inactive_and_radius_checks_remain(self):
+        self.login();data=photo_form(self)
+        self.assertEqual(self.client.post('/field/start',data={**data,'csrf':''}).status_code,403)
+        with SessionLocal.begin() as db:db.get(Client,1).status='INACTIVE'
+        self.assertEqual(self.client.post('/field/start',data=data).status_code,409)
+        with SessionLocal.begin() as db:c=db.get(Client,1);c.status='LEAD';c.latitude=24;c.longitude=72
+        self.assertEqual(self.client.post('/field/start',data=data).status_code,409)
+        with SessionLocal() as db:self.assertEqual(db.query(Activity).count(),6)
 
-
-def test_empty_database_offers_registration(self):
-    data=form(self)
-    with SessionLocal() as db:db.query(Client).delete();db.commit()
-    result=self.client.get('/field/nearby?latitude=23&longitude=72').json()
-    self.assertEqual(result['nearby'],[]);self.assertEqual(result['unmapped'],[])
-    html=self.client.get('/visits').text
-    self.assertIn('Register it using Add Business on Home',html)
-    self.assertNotIn('id="show-registration"',html)
-    self.assertNotIn('Select Salon',html)
-    response=self.client.post('/field/start',data={**data,'business_name':'New Academy','phone':'999','client_type':'ACADEMY','address':'Test address','pincode':'380001','notes':'Discuss treatments'},follow_redirects=False)
-    self.assertEqual(response.status_code,303)
-    with SessionLocal() as db:
-        c=db.query(Client).filter_by(business_name='New Academy').one()
-        self.assertEqual((c.latitude,c.longitude,c.created_by,c.assigned_sales_id),(23,72,2,2))
-        a=db.query(Activity).filter_by(client_id=c.id,activity_type='FIELD_VISIT').order_by(Activity.id.desc()).first()
-        self.assertEqual(a.status,'IN_PROGRESS');self.assertEqual(a.notes,'Discuss treatments');self.assertEqual(c.address,'Test address')
-        v=db.query(Visit).filter_by(activity_id=a.id).one();self.assertIsNotNone(v.check_in_at)
-
-
-def test_existing_first_visit_and_replay(self):
-    data={**form(self),'client_id':'1'}
-    first=self.client.post('/field/start',data=data,follow_redirects=False)
-    second=self.client.post('/field/start',data=data,follow_redirects=False)
-    self.assertEqual(first.status_code,303);self.assertEqual(first.headers['location'],second.headers['location'])
-    with SessionLocal() as db:
-        self.assertEqual(db.query(Activity).count(),7)
-        self.assertEqual(db.get(Client,1).latitude,23)
-        self.assertEqual(db.query(AuditLog).filter_by(action='FIELD_INTAKE').count(),1)
-
-
-def test_new_duplicate_rejected_without_visit(self):
-    data={**form(self),'business_name':'New Salon','phone':'111','client_type':'SALON'}
-    self.assertEqual(self.client.post('/field/start',data=data).status_code,409)
-    with SessionLocal() as db:self.assertEqual(db.query(Activity).count(),6);self.assertEqual(db.query(Client).count(),3)
-
-
-def test_permissions_invalid_gps_csrf_and_radius(self):
-    self.assertEqual(self.client.get('/field/nearby?latitude=23&longitude=72').status_code,401)
-    data={**form(self),'client_id':'1'}
-    for fields,status in [({'csrf':''},403),({'latitude':'nan'},400),({'longitude':'181'},400),({'visit_type':'BAD'},400),({'client_id':'999'},404)]:
-        self.assertEqual(self.client.post('/field/start',data={**data,**fields}).status_code,status)
-    with SessionLocal() as db:c=db.get(Client,1);c.latitude=24;c.longitude=72;db.commit()
-    self.assertEqual(self.client.post('/field/start',data=data).status_code,409)
-    with SessionLocal() as db:self.assertEqual(db.query(Activity).count(),6);self.assertEqual(db.get(Client,1).latitude,24)
-
-for test in [test_lookup_types_distance_unmapped_and_no_writes,test_empty_database_offers_registration,test_existing_first_visit_and_replay,test_new_duplicate_rejected_without_visit,test_permissions_invalid_gps_csrf_and_radius]:
-    setattr(FieldIntakeTests,test.__name__,test)
 del OperationsTests

@@ -16,6 +16,16 @@ from modules.security import hash_password
 from modules.operations import business_today
 
 
+def historical_started_visit():
+    from modules.workflows import now
+    with SessionLocal.begin() as db:
+        a=db.get(Activity,6);a.status='IN_PROGRESS'
+        v=db.query(Visit).filter_by(activity_id=6).one()
+        v.check_in_at=now();v.check_in_latitude=23;v.check_in_longitude=72
+        c=db.get(Client,1);c.latitude=23;c.longitude=72
+        db.add(AuditLog(user_id=2,entity_type='VISIT',entity_id=v.id,action='START',new_value='Historical fixture'))
+
+
 class OperationsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -59,6 +69,13 @@ class OperationsTests(unittest.TestCase):
         email={'manager':'manager@example.test','a':'a@example.test','b':'b@example.test'}[who]
         response=self.client.post('/login',data={'email':email,'password':'Test-only-password-123'},follow_redirects=False)
         self.assertEqual(response.status_code,303)
+        # Test fixture approves the browser directly; production has no bypass.
+        from database.models import EmployeeDevice
+        with SessionLocal.begin() as db:
+            device=db.query(EmployeeDevice).filter_by(user_id={'manager':1,'a':2,'b':3}[who]).order_by(EmployeeDevice.id.desc()).first()
+            device.status='APPROVED'
+            # Device bootstrap belongs to setup, not the operation's audit assertions.
+            db.query(AuditLog).filter_by(entity_type='EmployeeDevice',action='DEVICE_REQUEST',entity_id=device.id).delete()
         import re
         self.csrf=re.search(r'name="csrf" value="([^"]+)"',self.client.get('/visits').text)[1]
 
@@ -114,47 +131,32 @@ class OperationsTests(unittest.TestCase):
         self.punch_in_for_test(2,3)
         self.login('b')
         self.assertEqual(self.client.get('/visits/6').status_code,403)
-        for suffix,data in [('start',{'latitude':23,'longitude':72}),('request-end-otp',{'notes':'x'}),('verify-end-otp',{'otp':'123456'})]:
+        for suffix,data in [('request-end-otp',{'notes':'x'}),('verify-end-otp',{'otp':'123456'})]:
             self.assertEqual(self.client.post('/visits/6/'+suffix,data=data).status_code,403)
         with SessionLocal() as db:
             self.assertEqual(db.get(Activity,6).status,'CREATED')
             self.assertIsNone(db.query(Visit).filter_by(activity_id=6).one().check_in_at)
 
-    def test_valid_gps_checkin_and_immutable_timestamp(self):
-        self.punch_in_for_test(2,3)
-        self.login('a');data={'latitude':23,'longitude':72}
-        self.assertEqual(self.client.post('/visits/6/start',data=data).status_code,200)
+    def test_separate_start_is_retired_without_mutation(self):
+        self.login('a');self.punch_in_for_test()
+        response=self.client.post('/visits/6/start',data={'latitude':23,'longitude':72})
+        self.assertEqual(response.status_code,410)
+        self.assertIn('Add Visit',response.text)
         with SessionLocal() as db:
-            original=db.query(Visit).filter_by(activity_id=6).one().check_in_at
-            self.assertEqual(db.get(Client,1).latitude,23)
-        self.assertEqual(self.client.post('/visits/6/start',data=data).status_code,409)
-        with SessionLocal() as db:
-            self.assertEqual(db.query(Visit).filter_by(activity_id=6).one().check_in_at,original)
-        self.assertEqual(self.client.get('/visits/6').status_code,200)
-        self.assertEqual(self.client.get('/visits').status_code,200)
+            self.assertEqual(db.get(Activity,6).status,'CREATED')
+            self.assertIsNone(db.query(Visit).filter_by(activity_id=6).one().check_in_at)
 
-    def test_bad_gps_and_missing_visits_do_not_write(self):
-        self.punch_in_for_test(2,3)
-        self.login('a')
-        for lat,lon in [(100,72),(23,200),('nan',72),('inf',72)]:
-            self.assertEqual(self.client.post('/visits/6/start',data={'latitude':lat,'longitude':lon}).status_code,400)
-        for suffix,data in [('start',{'latitude':23,'longitude':72}),('request-end-otp',{'notes':'x'}),('verify-end-otp',{'otp':'123456'})]:
-            self.assertEqual(self.client.post('/visits/999/'+suffix,data=data).status_code,404)
-        self.assertEqual(self.client.post('/visits/create',data={'client_id':999,'visit_type':'SALES'}).status_code,404)
-        self.assertEqual(self.client.post('/visits/create',data={'client_id':1,'visit_type':'BAD'}).status_code,400)
-        with SessionLocal() as db:self.assertEqual(db.get(Activity,6).status,'CREATED')
-
-    def test_gps_radius_enforced(self):
-        self.punch_in_for_test(2,3)
-        self.login('a')
-        with SessionLocal() as db:
-            c=db.get(Client,1);c.latitude=23;c.longitude=72;db.commit()
-        self.assertEqual(self.client.post('/visits/6/start',data={'latitude':23.003,'longitude':72}).status_code,409)
-        self.assertEqual(self.client.post('/visits/6/start',data={'latitude':23.001,'longitude':72}).status_code,200)
+    def test_bad_gps_and_missing_businesses_do_not_write(self):
+        from tests.test_device_camera import photo_form
+        self.login('a');self.punch_in_for_test()
+        data=photo_form(self)
+        for changes,status in [({'latitude':'nan'},400),({'longitude':181},400),({'client_id':999},404)]:
+            self.assertEqual(self.client.post('/field/start',data={**data,**changes}).status_code,status)
+        with SessionLocal() as db:self.assertEqual(db.query(Activity).count(),6)
 
     def test_production_does_not_expose_or_queue_test_otp(self):
         self.punch_in_for_test(2,3)
-        self.login('a');self.client.post('/visits/6/start',data={'latitude':23,'longitude':72})
+        self.login('a');historical_started_visit()
         with patch.dict(os.environ,{'ESONE_ENV':'production'}):
             response=self.client.post('/visits/6/request-end-otp',data={'notes':'Visit done','csrf':self.csrf})
         self.assertEqual(response.status_code,503);self.assertNotIn('TEST OTP',response.text)
@@ -163,7 +165,7 @@ class OperationsTests(unittest.TestCase):
     def test_test_only_otp_completion_and_replay_rejected(self):
         self.punch_in_for_test(2,3)
         import re
-        self.login('a');self.client.post('/visits/6/start',data={'latitude':23,'longitude':72})
+        self.login('a');historical_started_visit()
         with patch.dict(os.environ,{'ESONE_ENV':'test'}):
             response=self.client.post('/visits/6/request-end-otp',data={'notes':'Visit done','csrf':self.csrf})
         code=re.search(r'TEST OTP: (\d+)',response.text).group(1)
@@ -203,7 +205,7 @@ class OperationsTests(unittest.TestCase):
 
     def test_mobile_has_actual_visit_count_and_no_fake_revenue(self):
         self.punch_in_for_test(2,3)
-        self.login('a');self.client.post('/visits/6/start',data={'latitude':23,'longitude':72})
+        self.login('a');historical_started_visit()
         response=self.client.get('/mobile')
         self.assertEqual(response.status_code,200)
         self.assertIn('<div class="number">1</div>',response.text)

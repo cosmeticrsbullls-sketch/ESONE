@@ -1,14 +1,12 @@
 (() => {
-const form=document.getElementById('field-form'),message=document.getElementById('field-message'),find=document.getElementById('find-business'),picker=document.getElementById('field-picker'),select=document.getElementById('business-select'),registration=document.getElementById('field-registration'),search=document.getElementById('business-search');
+const form=document.getElementById('field-form'),message=document.getElementById('field-message'),find=document.getElementById('find-business'),picker=document.getElementById('field-picker'),select=document.getElementById('business-select'),search=document.getElementById('business-search');
 let entries=[];
 function openForm(business) {
- const isNew=!business;
- registration.hidden=!isNew;registration.disabled=!isNew;
+ form.dispatchEvent(new Event('businesschange'));
  form.elements.client_id.value=business?business.id:'';
- document.getElementById('visit-form-title').textContent=isNew?'New business visit':'Visit details';
- document.getElementById('selected-business').textContent=business?[business.name,business.type,business.phone,business.area].filter(Boolean).join(' · '):'Register this business and start your first visit.';
+ document.getElementById('visit-form-title').textContent='Visit details';
+ document.getElementById('selected-business').textContent=business?[business.name,business.type,business.phone,business.area].filter(Boolean).join(' · '):'Register this business and record your first visit.';
  picker.hidden=true;form.hidden=false;message.textContent='Fill the visit details below.';
- const matches=document.getElementById('field-existing-matches');if(matches){matches.hidden=true;matches.replaceChildren();}
 }
 function render() {
  const term=search.value.trim().toLowerCase();
@@ -24,7 +22,7 @@ function render() {
   select.appendChild(group);
  }
  select.disabled=!matches.length;
- document.getElementById('business-help').textContent=matches.length?'Select the registered business to start your visit.':'No matching business. Use Add Business on Home to register it first.';
+ document.getElementById('business-help').textContent=matches.length?'Select the registered business to record your visit.':'No matching business. Use Add Business on Home to register it first.';
 }
 find.addEventListener('click',()=> {
  form.hidden=true;picker.hidden=true;find.disabled=true;message.textContent='Checking your location…';
@@ -42,40 +40,22 @@ find.addEventListener('click',()=> {
  finally{find.disabled=false;}
  },error=>{message.textContent='Allow location permission and turn on GPS, then try again. '+error.message;find.disabled=false;},{enableHighAccuracy:true,timeout:20000,maximumAge:0});
 });
+if(location.pathname==='/field/intake')find.click();
 search.addEventListener('input',render);
 select.addEventListener('change',()=>{const business=entries.find(c=>String(c.id)===select.value);if(business)openForm(business);});
 
-document.getElementById('choose-existing').addEventListener('click',()=>{form.hidden=true;picker.hidden=false;select.value='';message.textContent='Select your registered business.';});
-const submitMessage=document.getElementById('field-submit-message'),existingMatches=document.getElementById('field-existing-matches');
+document.getElementById('choose-existing').addEventListener('click',()=>{form.dispatchEvent(new Event('businesschange'));form.hidden=true;picker.hidden=false;select.value='';message.textContent='Select your registered business.';});
+const submitMessage=document.getElementById('field-submit-message');
 let submitting=false;
 function showSubmitMessage(text,isError=false){
  submitMessage.hidden=false;submitMessage.textContent=text;
  submitMessage.classList.toggle('has-error',isError);
  if(isError){submitMessage.focus({preventScroll:true});submitMessage.scrollIntoView({block:'center'});}
 }
-function offerRegisteredBusinesses(matches){
- existingMatches.replaceChildren();existingMatches.hidden=false;
- for(const business of matches){
-  const choice=document.createElement('button');choice.type='button';choice.disabled=!business.active;choice.setAttribute('data-action-icon','sales');
-  choice.textContent=(business.active?'Start visit at ':'Inactive — ')+[business.name,business.phone,business.area].filter(Boolean).join(' · ');
-  choice.addEventListener('click',()=>{
-   if(submitting||!business.active)return;
-   // Reuse the record only after the employee explicitly chooses it. Keep GPS,
-   // notes, visit type and submission key; the server still checks location.
-   form.elements.client_id.value=String(business.id);
-   registration.hidden=true;registration.disabled=true;
-   document.getElementById('selected-business').textContent=[business.name,business.type,business.phone,business.area].filter(Boolean).join(' · ');
-   document.getElementById('visit-form-title').textContent='Visit details';
-   existingMatches.hidden=true;form.requestSubmit();
-  });
-  existingMatches.appendChild(choice);
- }
-}
 async function responseMessage(response){
  const text=await response.text();
  if((response.headers.get('content-type')||'').includes('application/json')){
   try{const data=JSON.parse(text);
-   if(data.code==='BUSINESS_ALREADY_EXISTS'&&Array.isArray(data.matches))return {text:data.detail,matches:data.matches};
    if(typeof data.detail==='string')return {text:data.detail};
    if(Array.isArray(data.detail))return {text:data.detail.map(e=>String(e.loc?.at(-1)||'Field')+': '+e.msg).join('; ')};
   }catch(error){}
@@ -90,28 +70,24 @@ async function responseMessage(response){
 form.addEventListener('submit',async event=> {
  event.preventDefault();if(submitting)return;
  if(!form.reportValidity()){
-  showSubmitMessage('Complete the required business name and mobile fields before starting the visit.');return;
+  showSubmitMessage('Enter the visit details / outcome before finishing.');return;
  }
  submitting=true;form.setAttribute('aria-busy','true');
  const buttons=Array.from(form.querySelectorAll('button'));
  const start=buttons.find(b=>b.type==='submit');const original=start?.textContent;
  const disabledStates=buttons.map(b=>[b,b.disabled]);
- buttons.forEach(b=>b.disabled=true);if(start)start.textContent='Starting visit…';
- showSubmitMessage('Saving and starting visit…');
+ buttons.forEach(b=>b.disabled=true);if(start)start.textContent='Saving visit…';
+ showSubmitMessage('Saving completed visit…');
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
  try {
  const response=await fetch(form.action,{method:'POST',body:new FormData(form),signal:controller.signal});
- if(response.redirected&&response.ok){location.assign(response.url);return;}
+ if(response.redirected){location.assign(response.url);return;}
+ if(response.ok){const result=await response.json();if(result.redirect==='/workspace'){location.assign(result.redirect);return;}}
  const failure=await responseMessage(response),detail=failure.text;
- if(response.status===409&&failure.matches?.length){
-  offerRegisteredBusinesses(failure.matches);
-  showSubmitMessage(detail,true);return;
- }
  let help='';
- if(response.status===409&&/already exists/i.test(detail))help=' Tap BACK TO BUSINESS LIST to select the registered business. Do not register it again.';
- else if(response.status===409&&/location mismatch/i.test(detail))help=' The current GPS does not match this business. Recheck your location; do not register a duplicate business.';
+ if(response.status===409&&/location mismatch/i.test(detail))help=' The current GPS does not match this business. Recheck your location; do not register a duplicate business.';
  else if(response.status===403)help=' Reload this page and sign in again if requested.';
- showSubmitMessage('Could not start visit ('+response.status+'): '+detail+help,true);
+ showSubmitMessage('Could not save visit ('+response.status+'): '+detail+help,true);
  }catch(error){
  showSubmitMessage('Connection interrupted or timed out. Try again; the same submission will not create a duplicate visit.',true);
  }finally{

@@ -80,7 +80,7 @@ def queues(db, kind, q="", start=None, end=None):
         if q:
             like=f"%{q.strip()}%"
             query=query.filter((Client.business_name.ilike(like)) | (Client.phone.ilike(like)))
-        headers=["Activity ID","Client ID","Salon","Visit Type","Status","Employee ID","Created","Check In","Check Out","Notes"]
+        headers=["Activity ID","Client ID","Salon","Visit Type","Status","Employee ID","Created","Visit recorded / legacy check-in (UTC)","Legacy check-out (UTC)","Notes"]
         return headers,[[a.id,c.id,c.business_name,v.visit_type,a.status,a.assigned_user_id,a.created_at,v.check_in_at,v.check_out_at,a.notes or ""] for a,v,c in query.order_by(Activity.id.desc()).all()]
     if kind in {"calls", "demos"}:
         query = db.query(Activity, Client).join(Client, Client.id==Activity.client_id)
