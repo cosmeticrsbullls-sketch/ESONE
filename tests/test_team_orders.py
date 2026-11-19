@@ -193,6 +193,50 @@ class TeamOrderTests(unittest.TestCase):
             self.assertIn('New Shared Salon' if url != '/field/intake' else 'Search registered entries',
                           self.client.get(url).text)
 
+    def test_business_types_and_optional_registration_gps(self):
+        self.login()
+        form = self.form('/salons/new')
+        from database.models import Client, Visit
+        with SessionLocal() as db:
+            visits_before = db.query(Visit).count()
+        for index, kind in enumerate(['SALON', 'UNISEX', 'PARLOR', 'DISTRIBUTOR', 'ACADEMY', 'OTHER']):
+            data = {**form, 'business_name': 'Registered ' + kind,
+                    'phone': str(9800000000 + index), 'client_type': kind}
+            if kind == 'UNISEX':
+                data.update(at_location='yes', latitude='23', longitude='72', accuracy='12')
+            response = self.client.post('/salons/new', data=data, follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            with SessionLocal() as db:
+                client = db.query(Client).filter_by(business_name=data['business_name']).one()
+                self.assertEqual(client.client_type, kind)
+                self.assertEqual(client.latitude, 23 if kind == 'UNISEX' else None)
+                self.assertEqual(client.longitude, 72 if kind == 'UNISEX' else None)
+        with SessionLocal() as db:
+            self.assertEqual(db.query(Visit).count(), visits_before)
+            log = db.query(AuditLog).filter_by(action='GPS_REGISTERED').one()
+            self.assertIn('"accuracy_m": 12.0', log.new_value)
+        self.punch_in_for_test(1)
+        nearby = self.client.get('/field/nearby?latitude=23&longitude=72').json()
+        self.assertIn('Registered UNISEX', [item['name'] for item in nearby['nearby']])
+
+    def test_registration_gps_validation_and_duplicate_preservation(self):
+        self.login()
+        form = self.form('/salons/new')
+        data = {**form, 'business_name': 'GPS Salon', 'phone': '9870012345', 'at_location': 'yes'}
+        for gps in [{}, {'latitude': 'NaN', 'longitude': '72', 'accuracy': '10'},
+                    {'latitude': '91', 'longitude': '72', 'accuracy': '10'},
+                    {'latitude': '23', 'longitude': '72', 'accuracy': '201'},
+                    {'latitude': '23', 'longitude': '72', 'accuracy': '-1'}]:
+            self.assertEqual(self.client.post('/salons/new', data={**data, **gps}).status_code, 400)
+        data.update(latitude='23', longitude='72', accuracy='10')
+        self.assertEqual(self.client.post('/salons/new', data=data, follow_redirects=False).status_code, 303)
+        self.assertEqual(self.client.post('/salons/new', data={**data, 'latitude': '24'}).status_code, 409)
+        from database.models import Client
+        with SessionLocal() as db:
+            client = db.query(Client).filter_by(business_name='GPS Salon').one()
+            self.assertEqual(client.latitude, 23)
+            self.assertEqual(db.query(AuditLog).filter_by(action='GPS_REGISTERED').count(), 1)
+
     def test_business_search_duplicate_normalization_and_csrf(self):
         self.login()
         form = self.form('/salons/new')
