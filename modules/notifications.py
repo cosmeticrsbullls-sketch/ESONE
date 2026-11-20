@@ -6,7 +6,7 @@ from fastapi import APIRouter,Request,Form
 from fastapi.responses import HTMLResponse,RedirectResponse
 from sqlalchemy import or_
 from database.db import SessionLocal
-from database.models import Activity,User,Client,Attendance,PromiseToPay,NotificationRead,AuditLog,DemoBooking,SalesOrder
+from database.models import DemoBookingRequest,Activity,User,Client,Attendance,PromiseToPay,NotificationRead,AuditLog,DemoBooking,SalesOrder
 from modules.team import staff_access,MANAGEMENT
 from modules.workflows import page,hidden,now
 from modules.operations import business_today,queues
@@ -50,6 +50,13 @@ def inbox(db,request):
             for r in rows:items.append((('PTP due / overdue: '+str(r[2])) if kind=='ptp' else ('Courtesy call due: '+str(r[1])),'/operations?kind='+kind,lower))
         for event in db.query(AuditLog).filter(AuditLog.created_at>=lower,AuditLog.created_at<upper,AuditLog.action.in_(['MANAGEMENT_CLOSE','PROFILE_UPDATED','ADMIN_PASSWORD_RESET','PUNCH_IN','PUNCH_OUT','AUTO_PUNCH_OUT'])).order_by(AuditLog.id.desc()).limit(500):
             items.append((f'{people.get(event.user_id,"Management")} · {event.action.replace("_"," ")}', '/activity-reports',event.created_at))
+    requests=db.query(DemoBookingRequest)
+    if not manager:requests=requests.filter_by(requested_by=uid)
+    for item in requests.filter(DemoBookingRequest.status.in_(['PENDING','APPROVED','REJECTED'])).all():
+        if manager and item.status!='PENDING':continue
+        stamp=item.reviewed_at or item.created_at
+        if stamp and (stamp>=lower or item.status=='PENDING'):
+            items.append((f'Demo request #{item.id} · {item.status}', '/command-center/demo-requests' if manager else '/demo-requests',stamp))
     return sorted(items,key=lambda x:x[2],reverse=True)
 
 @router.get('/notifications',response_class=HTMLResponse)
@@ -66,6 +73,7 @@ def notifications(request:Request):
 .notification-open:hover{background:#f6e9c8}
 .notification-open:active{background:#e8d29d;transform:translateY(1px)}
 </style>'''
+    content+='<p><a href="/permissions?manage=1">Set up browser permissions / notifications</a></p>'
     content+=f'<p>{len(items)} activity and pending reminders. Business date {business_today()} (India).</p><form method="post">{hidden(request)}<button>Mark current updates read</button></form>'
     content+=''.join(f'<article class="card notification-row"><strong>{"New · " if stamp>read_at else ""}{escape(title)}</strong><a class="notification-open" href="{escape(url,quote=True)}" aria-label="Open details: {escape(title,quote=True)}" title="Open details">{action_svg("open")}</a></article>' for title,url,stamp in items) or '<p>No activities or pending reminders.</p>'
     return page('Notifications / Messages',content)
