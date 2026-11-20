@@ -36,7 +36,7 @@ find.addEventListener('click',()=> {
  const data=await response.json();entries=[...data.nearby,...data.unmapped];
  form.elements.latitude.value=lat;form.elements.longitude.value=lon;
  search.value='';render();find.hidden=true;picker.hidden=false;
- message.textContent=`${data.nearby.length} registered businesses found within ${data.radius_m}m. Select your registered business. Register a missing business using Add Business on Home. Businesses without GPS are listed separately for their first verified visit.`;
+ message.textContent='';
  }catch(error){message.textContent='Could not check businesses. '+error.message;}
  finally{find.disabled=false;}
  },error=>{message.textContent='Allow location permission and turn on GPS, then try again. '+error.message;find.disabled=false;},{enableHighAccuracy:true,timeout:20000,maximumAge:0});

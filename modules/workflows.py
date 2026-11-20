@@ -173,6 +173,10 @@ def demo_access(request, csrf=None):
     return staff_access(request, csrf)
 
 
+def demo_executor(booking, activity):
+    return booking.assigned_educator_id or activity.created_by
+
+
 def demo_owner(request, activity):
     return request.session.get('role') in OFFICE_ROLES or request.session['user_id'] in {activity.created_by,activity.assigned_user_id}
 
@@ -386,12 +390,18 @@ def demo_detail(demo_id:int,request:Request):
         c=db.get(Client,a.client_id);u=db.get(User,d.assigned_educator_id) if d.assigned_educator_id else None
         named=db.get(DemoEducator,d.id);educator_label=named.name if named else (u.full_name if u else 'Unassigned')
         content=f'<p>{escape(c.business_name)} · {escape(d.product_or_treatment or "")} · {d.demo_date} (India)</p><p>Educator: {escape(educator_label)} · {escape(a.status)} · {escape(d.conversion_status or "")}</p><p>{escape(a.notes or "")}</p><p>Follow-up: {d.followup_at.date() if d.followup_at else "—"}</p><p>Started: {d.started_at or "—"} · Completed: {d.completed_at or "—"} (UTC)</p>'
-        content+=f'<form method="post" action="/demos/{demo_id}/educator">{hidden(request)}<label>Educator name<input name="educator_name" maxlength="150" value="{escape(educator_label,quote=True)}" required></label><button>Update educator name</button></form>'
+        if request.session.get('role') in OFFICE_ROLES and a.status == 'BOOKED':
+            people='<option value="0">Other educator</option>'+''.join(f'<option value="{person.id}" {"selected" if person.id==d.assigned_educator_id else ""}>{escape(person.full_name)}</option>' for person in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
+            content+='<style>[data-assignment-other][hidden]{display:none!important}</style>'
+            content+=f'<form data-demo-assignment method="post" action="/demos/{demo_id}/educator">{hidden(request)}<label>Educator<select name="educator_id">{people}</select></label><label data-assignment-other>Other educator name<input name="educator_name" maxlength="150" value="{escape(educator_label if not d.assigned_educator_id else "",quote=True)}"></label><button>Update educator</button></form>'
+            content+='''<script>(()=>{const form=document.querySelector("[data-demo-assignment]"),select=form.elements.educator_id,other=form.querySelector("[data-assignment-other]");function refresh(){const guest=select.value==="0";other.hidden=!guest;form.elements.educator_name.disabled=!guest;form.elements.educator_name.required=guest;}select.addEventListener("change",refresh);refresh();})();</script>'''
         if a.status in {'BOOKED','IN_PROGRESS'}:
             working=on_duty(db,request.session['user_id'])
             finishing=open_shift(db,request.session['user_id'])
-            actions=(['START','CANCEL'] if working else ['CANCEL']) if a.status=='BOOKED' else (['COMPLETE'] if finishing else [])
-            if not working:content+=notice()
+            executor = demo_executor(d,a) == request.session['user_id']
+            actions=((['START'] if working and executor else [])+['CANCEL']) if a.status=='BOOKED' else (['COMPLETE'] if finishing and executor else [])
+            if executor and not working:content+=notice()
+            if not executor:content+='<p>Demo execution is handled by the assigned educator, or the booking employee when an external educator is selected.</p>'
         if a.status in {'BOOKED','IN_PROGRESS'} and actions:
             content+=f'''<form method="post">{hidden(request)}{choices("action", [(v,{"START":"Start Demo","CANCEL":"Cancel Booking","COMPLETE":"Complete Demo"}[v]) for v in actions], actions[0], "Demo action")}{choices("result", [("CONVERTED","Converted"),("NOT_CONVERTED","Not converted"),("FOLLOW_UP","Follow-up needed")], "CONVERTED", "Conversion result (completion only)")}<label>Notes / reason <textarea name="notes" maxlength="4000" required></textarea></label><label data-when="followup">Follow-up date <input name="followup" type="date"></label><button>Save</button></form>'''
     from modules.pdf_reports import share_button, SHARE_SCRIPT
@@ -411,7 +421,8 @@ def demo_transition(demo_id:int,request:Request,action:str=Form(...),result:str=
         if action in {'START','COMPLETE'}:
             preview=db.get(DemoBooking,demo_id)
             parent=db.get(Activity,preview.activity_id) if preview else None
-            executor=(preview.assigned_educator_id or parent.assigned_user_id or parent.created_by) if parent else None
+            executor=demo_executor(preview,parent) if parent else None
+            if parent and executor != request.session['user_id']:return HTMLResponse('Only the assigned educator, or the booking employee for an external educator, may start or complete this demo.',403)
             ids={request.session['user_id']} | ({executor} if executor else set())
             db.query(User).filter(User.id.in_(ids)).order_by(User.id).with_for_update().all()
             denied=require_duty(db, request, finishing=action=='COMPLETE')
@@ -421,7 +432,8 @@ def demo_transition(demo_id:int,request:Request,action:str=Form(...),result:str=
         a=db.get(Activity,d.activity_id)
         if not demo_owner(request,a):return HTMLResponse('Access Denied',403)
         if action in {'START','COMPLETE'}:
-            executor=d.assigned_educator_id or a.assigned_user_id or a.created_by
+            executor=demo_executor(d,a)
+            if executor != request.session['user_id']:return HTMLResponse('Demo execution access denied.',403)
             if executor and executor != request.session['user_id']:
                 db.query(User).filter_by(id=executor).with_for_update().one()
                 if not on_duty(db, executor) and not (action=='COMPLETE' and open_shift(db,executor)):return HTMLResponse('The assigned educator must Punch In before this demo can start or complete.',409)
@@ -438,22 +450,27 @@ def demo_transition(demo_id:int,request:Request,action:str=Form(...),result:str=
     return RedirectResponse('/workspace' if action=='COMPLETE' else f'/demos/{demo_id}',303)
 
 @router.post('/demos/{demo_id}/educator')
-def edit_educator(demo_id:int,request:Request,educator_name:str=Form(...),csrf:str=Form('')):
+def edit_educator(demo_id:int,request:Request,educator_name:str=Form(''),educator_id:int=Form(0),csrf:str=Form('')):
     denied=demo_access(request,csrf)
     if denied is not None:return denied
+    if request.session.get('role') not in OFFICE_ROLES:return HTMLResponse('Only Command Center may change the educator after booking.',403)
     educator_name=educator_name.strip()
-    if not 1<=len(educator_name)<=150:return HTMLResponse('Enter educator name (1-150 characters)',400)
+    if educator_id<0 or (not educator_id and not 1<=len(educator_name)<=150):return HTMLResponse('Choose an educator or enter an external educator name.',400)
     with SessionLocal.begin() as db:
         d=db.query(DemoBooking).filter_by(id=demo_id).with_for_update().first()
         if not d:return HTMLResponse('Demo not found',404)
         a=db.get(Activity,d.activity_id)
         if not demo_owner(request,a):return HTMLResponse('Access Denied',403)
+        if a.status != 'BOOKED':return HTMLResponse('Educator can only change before the demo starts.',409)
+        educator=db.get(User,educator_id) if educator_id else None
+        if educator_id and (not educator or not educator.is_active):return HTMLResponse('Choose an active educator.',400)
+        if educator:educator_name=educator.full_name
         named=db.get(DemoEducator,demo_id)
         old=named.name if named else None
         if not named:named=DemoEducator(demo_id=demo_id);db.add(named)
         named.name=educator_name;named.updated_by=request.session['user_id'];named.updated_at=now()
-        # Changing free-text name clears stale assignment to an unrelated registered educator.
-        d.assigned_educator_id=None;a.assigned_user_id=None
+        # Registered assignment controls execution; external educators delegate to the booker.
+        d.assigned_educator_id=educator_id or None;a.assigned_user_id=educator_id or None
         audit(db,request,'DemoBooking',demo_id,'EDUCATOR_UPDATED',old=old,new=educator_name)
     return RedirectResponse(f'/demos/{demo_id}',303)
 
