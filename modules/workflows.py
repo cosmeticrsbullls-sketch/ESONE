@@ -70,6 +70,19 @@ def salon_field(options, destination):
     return f'''<div class="salon-picker"><label>Business <input type="search" class="salon-search" placeholder="Search business / mobile" aria-label="Search salon options" autocomplete="off"><select name="client_id" required aria-label="Salon">{options}</select></label><small class="salon-help" aria-live="polite">Select a registered business. Register a missing business using Add Business on Home.</small></div>'''
 
 
+def demo_business_field(db, selected=0):
+    from collections import Counter
+    clients=db.query(Client).filter(Client.status!='INACTIVE').order_by(Client.business_name,Client.id).all()
+    labels=[c.business_name+(' · '+c.phone if c.phone else '')+(' · '+c.area if c.area else '') for c in clients]
+    counts=Counter(labels)
+    entries=[(c.id,label+(f' · #{c.id}' if counts[label]>1 else '')) for c,label in zip(clients,labels)]
+    value=next((label for identity,label in entries if identity==selected),'')
+    identity=selected if value else ''
+    options=''.join(f'<option value="{escape(label,quote=True)}" data-client-id="{cid}"></option>' for cid,label in entries)
+    help_text='Type a business name or mobile and choose a matching suggestion.' if entries else 'No businesses registered — use Add Business on Home.'
+    return f'''<style>[data-other-educator][hidden]{{display:none!important}}[data-business-picker] input[type=search]{{width:100%}}</style><div data-business-picker><label>Business <input type="search" name="business_label" list="demo-businesses" placeholder="Search business / mobile" aria-label="Business" autocomplete="off" required value="{escape(value,quote=True)}"></label><input type="hidden" name="client_id" value="{identity}"><datalist id="demo-businesses">{options}</datalist><small data-business-help aria-live="polite">{help_text}</small></div>'''
+
+
 def amount(value):
     try:
         result=Decimal(value)
@@ -192,13 +205,13 @@ def demo_form(request:Request, client_id:int=0, demo_day:date|None=None, educato
         if educator_id:
             educator=db.get(User,educator_id)
             if not educator or not educator.is_active:return HTMLResponse('Choose an active educator.',400)
-        clients=clients_select(db,client_id)
-        people='<option value="0" '+('selected' if not educator_id else '')+'>Optional registered educator</option>'+''.join(f'<option value="{u.id}" {"selected" if u.id==educator_id else ""}>{escape(u.full_name)}</option>' for u in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
+        business=demo_business_field(db,client_id)
+        people='<option value="" disabled '+('selected' if not educator_id else '')+'>Select educator</option><option value="0">Other educator</option>'+''.join(f'<option value="{u.id}" {"selected" if u.id==educator_id else ""}>{escape(u.full_name)}</option>' for u in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
     date_script='''<script>const input=document.querySelector('input[name=demo_at]');const output=document.querySelector('#date-bookings');let requestNo=0;async function refreshBookings(){const seq=++requestNo;const day=input.value.slice(0,10);if(!day)return;output.textContent='Checking booked demos…';try{const r=await fetch('/demo-availability?day='+encodeURIComponent(day));if(!r.ok)throw Error();const result=await r.json();if(seq!==requestNo)return;output.replaceChildren();const title=document.createElement('strong');title.textContent=result.bookings.length+' demos booked on '+day;output.append(title);result.bookings.forEach(item=>{const row=document.createElement('div');row.textContent=item.time+' · '+item.salon+' · '+item.educator+' · '+item.status;output.append(row);});}catch(e){if(seq===requestNo)output.textContent='Could not check bookings. Open demo calendar before confirming.';}}input.addEventListener('change',refreshBookings);input.addEventListener('input',refreshBookings);document.querySelectorAll('[data-date]').forEach(d=>d.addEventListener('click',()=>setTimeout(refreshBookings,0)));if(input.value)refreshBookings();</script>'''
     direct_booking = request.session['role'] in OFFICE_ROLES
     submit_label = 'Submit'
     approval_notice = '' if direct_booking else '<p>Command Center approval is required before the demo appears on the calendar.</p>'
-    return page('Book Demo',approval_notice+f'''<h2>2. Demo details</h2><p>Selected date: <strong>{demo_day.strftime('%d %B %Y')}</strong> · <a href="/demos/new?month={demo_day.strftime('%Y-%m')}&amp;client_id={client_id}&amp;educator_id={educator_id}">Change date</a></p><form id="demo-booking" method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients, "/demos/new")}<label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" value="{str(demo_day)+'T10:00' if demo_day and demo_day>=business_today() else ''}" required></label><label>Registered educator <select name="educator_id">{people}</select></label><label>Educator name<input name="educator_name" maxlength="150" placeholder="Enter any educator name"></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>{submit_label}</button></form><p id="date-bookings" aria-live="polite"></p>'''+date_script)
+    return page('Book Demo',approval_notice+f'''<h2>2. Demo details</h2><p>Selected date: <strong>{demo_day.strftime('%d %B %Y')}</strong> · <a href="/demos/new?month={demo_day.strftime('%Y-%m')}&amp;client_id={client_id}&amp;educator_id={educator_id}">Change date</a></p><form id="demo-booking" method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{business}<label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" value="{str(demo_day)+'T10:00' if demo_day and demo_day>=business_today() else ''}" required></label><label>Educator <select name="educator_id" required>{people}</select></label><label data-other-educator hidden>Other educator name<input name="educator_name" disabled maxlength="150" placeholder="Enter educator name"></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>{submit_label}</button></form><p id="date-bookings" aria-live="polite"></p>'''+date_script+'<script src="/assets/demo-picker.js?v=1" defer></script>')
 
 @router.post('/demos')
 def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(0),treatment:str=Form(...),demo_at:str=Form(...),notes:str=Form(''),csrf:str=Form(''),submission:str=Form(''),custom_treatment:str=Form(''),educator_name:str=Form('')):
@@ -216,8 +229,9 @@ def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(0),tr
         db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
         if db.query(AuditLog).filter_by(user_id=request.session['user_id'],new_value=submission).filter(AuditLog.action.in_(['DEMO_BOOKED','DEMO_REQUESTED'])).first():return HTMLResponse('This demo was already booked.',409)
         if not db.get(Client,client_id):return HTMLResponse('Client not found',404)
+        if db.get(Client,client_id).status=='INACTIVE':return HTMLResponse('Choose an active registered business.',400)
         educator=db.get(User,educator_id) if educator_id else None
-        educator_name=educator_name.strip() or (educator.full_name if educator else '')
+        educator_name=educator.full_name if educator and educator.is_active else educator_name.strip()
         if not educator_name or len(educator_name)>150 or (educator_id and (not educator or not educator.is_active)):return HTMLResponse('Enter an educator name or select an active educator.',400)
         details = dict(
             client_id=client_id, treatment=treatment.strip(), demo_date=scheduled,
@@ -461,3 +475,9 @@ def availability(request:Request,day:date):
             user=db.get(User,d.assigned_educator_id) if d.assigned_educator_id else None
             bookings.append({'time':d.demo_date.strftime('%H:%M'),'salon':c.business_name,'educator':names.get(d.id,user.full_name if user else 'Unassigned'),'status':a.status})
     return JSONResponse({'day':str(day),'bookings':bookings},headers={'Cache-Control':'no-store'})
+
+@router.get('/assets/demo-picker.js', include_in_schema=False)
+def demo_picker_script():
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    return FileResponse(Path(__file__).with_name('demo_picker.js'),media_type='application/javascript')
