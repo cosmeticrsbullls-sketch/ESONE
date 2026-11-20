@@ -73,13 +73,20 @@ def permissions(request:Request):
         from fastapi.responses import RedirectResponse
         return RedirectResponse('/login',303)
     with SessionLocal.begin() as db:
-        device=require_device(db,request);public=keys(db).public_key
+        device=require_device(db,request)
+        user=db.get(User,device.user_id)
+        if user.role=='SUPER_ADMIN':
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse('/workspace',303)
+        from modules.access_policy import permissions_required
+        field_required=permissions_required(db,user,request)
+        public=keys(db).public_key
         identity=f'{device.user_id}:{device.id}'
-    content=f'''<div id="permission-setup" data-device="{identity}" data-key="{public}">{hidden(request)}<p>Set up this browser once. Permissions can be changed later in browser settings.</p><style>.permission-row{{padding:16px 0;border-bottom:1px solid #ddd}}.permission-row span{{display:block;margin:6px 0}}[hidden]{{display:none!important}}</style>
-<div class="permission-row"><strong>📍 Location</strong><span id="location-status" role="status">Checking…</span><button type="button" id="allow-location">Enable Location</button></div>
+    content=f'''<div id="permission-setup" data-device="{identity}" data-key="{public}" data-field-required="{str(field_required).lower()}">{hidden(request)}<p>Set up this browser once. Permissions can be changed later in browser settings.</p><style>.permission-row{{padding:16px 0;border-bottom:1px solid #ddd}}.permission-row span{{display:block;margin:6px 0}}[hidden]{{display:none!important}}</style>
+<div {"" if field_required else "hidden"}><div class="permission-row"><strong>📍 Location</strong><span id="location-status" role="status">Checking…</span><button type="button" id="allow-location">Enable Location</button></div>
 <div class="permission-row"><strong>📷 Camera</strong><span id="camera-status" role="status">Checking…</span><button type="button" id="allow-camera">Enable Camera</button></div>
-<div class="permission-row"><strong>🔔 Notifications</strong><span id="notification-status" role="status">Checking…</span><button type="button" id="allow-notifications">Enable Notifications</button> <button type="button" id="test-notification" hidden>Send Test Notification</button> <button type="button" id="skip-notifications">Skip for now</button> <button type="button" id="disable-notifications" hidden>Turn off notifications</button></div>
-<p id="setup-message" role="status"></p><button type="button" id="setup-continue" disabled>Continue to Home</button><p id="push-install" hidden>On iPhone/iPad, install ESONE using Share → Add to Home Screen, then open it from that icon to enable push notifications.</p><p>If permission is blocked, allow it in this site's browser settings.</p></div><script src="/assets/permissions.js?v=1" defer></script>'''
+</div><div class="permission-row"><strong>🔔 Notifications</strong><span id="notification-status" role="status">Checking…</span><button type="button" id="allow-notifications">Enable Notifications</button> <button type="button" id="test-notification" hidden>Send Test Notification</button> <button type="button" id="skip-notifications">Skip for now</button> <button type="button" id="disable-notifications" hidden>Turn off notifications</button></div>
+<p id="setup-message" role="status"></p><button type="button" id="setup-continue" disabled>Continue to Home</button><p id="push-install" hidden>On iPhone/iPad, install ESONE using Share → Add to Home Screen, then open it from that icon to enable push notifications.</p><p>If permission is blocked, allow it in this site's browser settings.</p></div><script src="/assets/permissions.js?v=2" defer></script>'''
     if request.session.get('role') in {'SUPER_ADMIN','MANAGEMENT','OFFICE'}:content+='<p><a href="/command-center">Open Command Center</a></p>'
     return HTMLResponse(page('Set up ESONE',content),headers={'Cache-Control':'no-store'})
 

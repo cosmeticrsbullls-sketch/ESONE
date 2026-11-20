@@ -149,7 +149,7 @@ class DeviceCameraTests(unittest.TestCase):
         with SessionLocal.begin() as db:
             db.add(User(full_name='Root',email='root@example.test',role='SUPER_ADMIN',password_hash=hash_password('Test-only-password-123')))
         result=self.client.post('/login',data={'email':'root@example.test','password':'Test-only-password-123'},follow_redirects=False)
-        self.assertEqual(result.headers['location'],'/permissions')
+        self.assertEqual(result.headers['location'],'/workspace')
         result=self.client.get('/device-access')
         self.assertEqual(len(result.headers.get_list('set-cookie')),2)
         self.assertEqual(self.client.get('/command-center/devices').status_code,200)
@@ -165,7 +165,7 @@ class DeviceCameraTests(unittest.TestCase):
         try:
             for browser in (self.client,other):
                 response=browser.post('/login',data={'email':'root@example.test','password':'Test-only-password-123'},follow_redirects=False)
-                self.assertEqual(response.headers['location'],'/permissions')
+                self.assertEqual(response.headers['location'],'/workspace')
             self.assertEqual(self.client.get('/command-center/devices').status_code,200)
             self.assertEqual(other.get('/command-center/devices').status_code,200)
             with SessionLocal.begin() as db:
