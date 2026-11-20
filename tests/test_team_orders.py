@@ -27,6 +27,19 @@ class TeamOrderTests(unittest.TestCase):
     def order(self,**extra):
         d=self.form('/orders/new');d.update(client_id=1,**{'qty_ES-01':'2','discount_ES-01':'50','qty_ES-16':'3','discount_ES-16':'10'});d.update(extra);return d
 
+    def test_activity_forms_use_shared_single_box_picker(self):
+        self.login()
+        self.punch_in_for_test(1,2,3)
+        for url in ['/orders/new','/calls/new?kind=COLLECTION','/calls/new?kind=COURTESY_CALL','/billing/new?kind=GST','/billing/new?kind=NON_GST','/field/intake?visit_type=SALES','/field/intake?visit_type=COLLECTION','/field/intake?visit_type=COURTESY']:
+            with self.subTest(url=url):
+                response=self.client.get(url)
+                self.assertEqual(response.status_code,200)
+                self.assertIn('data-unified-business',response.text)
+                self.assertIn('/assets/business-picker.js?v=1',response.text)
+        script=self.client.get('/assets/business-picker.js')
+        self.assertEqual(script.status_code,200)
+        self.assertIn('businessoptionschange',script.text)
+
     def test_gps_punch_state_csrf_duplicate_and_evidence(self):
         self.login('a');d=self.form('/attendance');d.update(action='IN',latitude=23,longitude=72,accuracy=12)
         for bad in [{'csrf':'bad'},{'latitude':'NaN'},{'accuracy':201}]:
@@ -194,7 +207,7 @@ class TeamOrderTests(unittest.TestCase):
         results = self.client.get('/business-search?q=shared').json()['matches']
         self.assertEqual(results[0]['name'], 'New Shared Salon')
         for url in ['/orders/new', '/demos/new?demo_day=2028-02-29', '/field/intake']:
-            self.assertIn('New Shared Salon' if url != '/field/intake' else 'Search registered entries',
+            self.assertIn('New Shared Salon' if url != '/field/intake' else 'data-unified-business',
                           self.client.get(url).text)
 
     def test_business_types_and_optional_registration_gps(self):

@@ -92,7 +92,7 @@ def enhance(document, path, name='', role='', signed_in=False):
     if is_login:document=document.replace('<div class="login-box">','<div class="login-box">'+brand_mark(),1)
     if is_login:document=document.replace('</form>','</form><p><a href="/forgot-password">Forgot password?</a></p><div class="login-foot">Earthshine Professional · Business workspace</div>',1)
     if signed_in:
-        document=document.replace('</body>', NOTIFICATION_SCRIPT+ACTION_FEEDBACK_SCRIPT+'</body>')
+        document=document.replace('</body>', NOTIFICATION_SCRIPT+ACTION_FEEDBACK_SCRIPT+'<script src="/assets/business-picker.js?v=1" defer></script></body>')
         document=document.replace('</body>', '<script>document.querySelectorAll("table").forEach(t=>{const labels=Array.from(t.querySelectorAll("thead th, tr:first-child th")).map(x=>x.textContent.trim());t.querySelectorAll("tr").forEach(r=>r.querySelectorAll("td").forEach((d,i)=>d.dataset.label=labels[i]||""));});</script></body>')
     return decorate_controls(document)
 
@@ -156,3 +156,13 @@ CSS += """
 """
 
 CSS += ACTION_ICON_CSS
+
+CSS += """
+[data-unified-business] select[hidden],.business-suggestions[hidden]{display:none!important}
+[data-unified-business]{min-width:0}
+[data-unified-business] input[type=search]{width:100%}
+.business-suggestions{max-height:260px;overflow:auto;border:1px solid #c7a252;border-radius:9px;background:#fff;margin:4px 0 8px}
+.esone-app .business-suggestions button{display:block;width:100%!important;grid-column:auto;text-align:left;background:#fff!important;color:#26343e!important;border:0!important;border-bottom:1px solid #eee!important;border-radius:0!important;padding:14px!important;margin:0!important}
+.esone-app .business-suggestions button[aria-selected=true]{background:#fff2d4!important}
+[data-unified-business]>small{display:block}
+"""
