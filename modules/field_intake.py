@@ -38,9 +38,9 @@ def intake(request):
 <style>.field-intake [hidden]{{display:none!important}}.field-intake #field-submit-message{{padding:12px;border:1px solid #d7b666;border-radius:8px;background:#fff8e8;color:#795415}}.field-intake #field-submit-message.has-error{{border-color:#df9a92;background:#fff2ef;color:#9a3026}}.field-intake label{{display:grid;gap:7px;margin:14px 0}}.field-intake input,.field-intake select,.field-intake textarea{{width:100%}}.field-intake fieldset{{border:0;padding:0;margin:0}}.field-intake .field-grid{{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}}.field-intake button{{margin:8px 6px 8px 0}}@media(max-width:600px){{.field-intake .field-grid{{grid-template-columns:1fr}}.field-intake button{{width:100%}}}}</style>
 <button type="button" id="find-business">📍 Find / Select Business</button>
 <p id="field-message" role="status" aria-live="polite"></p>
-<section id="field-picker" hidden><h3>Select business</h3>
-<label>Search registered entries <input id="business-search" type="search" placeholder="Name / mobile / area"></label>
-<label>Registered businesses near you / first GPS visits <select id="business-select"></select></label>
+<section id="field-picker" data-unified-business hidden><h3>Select business</h3>
+<label>Business <input id="business-search" type="search" placeholder="Name / mobile / area"></label>
+<select id="business-select" aria-label="Registered businesses"></select>
 <p id="business-help"></p><p>Business missing? Register it using Add Business on Home, then return to start your visit.</p><a class="secondary" href="/workspace">Back to Home</a></section>
 <form id="field-form" method="post" action="/field/start" hidden novalidate>
 <input type="hidden" name="csrf" value="{token(request)}"><input type="hidden" name="submission" value="{token_urlsafe(24)}">
@@ -51,7 +51,7 @@ def intake(request):
 <p id="field-submit-message" role="status" aria-live="polite" tabindex="-1" hidden></p>
 {widget()}
 <button type="submit">Finish</button><button type="button" id="choose-existing">← BACK TO BUSINESS LIST</button>
-</form><script src="/field/intake.js?v=5" defer></script></div>'''
+</form><script src="/field/intake.js?v=6" defer></script></div>'''
 
 
 @router.get('/field/intake', response_class=HTMLResponse)

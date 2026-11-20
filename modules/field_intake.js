@@ -22,6 +22,7 @@ function render() {
   select.appendChild(group);
  }
  select.disabled=!matches.length;
+ select.dispatchEvent(new Event('businessoptionschange'));
  document.getElementById('business-help').textContent=matches.length?'Select the registered business to record your visit.':'No matching business. Use Add Business on Home to register it first.';
 }
 find.addEventListener('click',()=> {
@@ -41,10 +42,10 @@ find.addEventListener('click',()=> {
  },error=>{message.textContent='Allow location permission and turn on GPS, then try again. '+error.message;find.disabled=false;},{enableHighAccuracy:true,timeout:20000,maximumAge:0});
 });
 if(location.pathname==='/field/intake')find.click();
-search.addEventListener('input',render);
+
 select.addEventListener('change',()=>{const business=entries.find(c=>String(c.id)===select.value);if(business)openForm(business);});
 
-document.getElementById('choose-existing').addEventListener('click',()=>{form.dispatchEvent(new Event('businesschange'));form.hidden=true;picker.hidden=false;select.value='';message.textContent='Select your registered business.';});
+document.getElementById('choose-existing').addEventListener('click',()=>{form.dispatchEvent(new Event('businesschange'));form.hidden=true;picker.hidden=false;select.value='';select.dispatchEvent(new Event('businessoptionschange'));message.textContent='Select your registered business.';});
 const submitMessage=document.getElementById('field-submit-message');
 let submitting=false;
 function showSubmitMessage(text,isError=false){
