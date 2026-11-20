@@ -4,7 +4,7 @@ const source=fs.readFileSync(require('node:path').join(__dirname,'../modules/vis
 function setup({denyCamera=false,denyGps=false,challengeStatus=200}={}){
  const handlers={},elements=Object.fromEntries(['photo_data','photo_nonce','latitude','longitude','csrf','client_id'].map(k=>[k,{value:k==='client_id'?'1':k==='csrf'?'csrf-value':''}]));
  const node=()=>({hidden:false,disabled:false,textContent:'',addEventListener(type,fn){this.handlers??={};this.handlers[type]=fn;},scrollIntoView(){this.scrolled=true;}});
- const video=node(),preview=node(),open=node(),capture=node(),msg=node();let stopped=0,requests=0;
+ const video=node(),preview=node(),open=node(),capture=node(),msg=node();open.textContent='Open Camera';capture.hidden=true;let stopped=0,requests=0;
  video.videoWidth=1280;video.videoHeight=720;video.play=async()=>{};
  const stream={active:true,getTracks:()=>[{stop:()=>stopped++}]};
  const form={elements,addEventListener:(key,fn)=>handlers[key]=fn};
@@ -17,11 +17,11 @@ function setup({denyCamera=false,denyGps=false,challengeStatus=200}={}){
 }
 (async()=>{
  let t=setup();let prevented=false;t.handlers.submit({preventDefault(){prevented=true;},stopImmediatePropagation(){}});assert(prevented);assert.match(t.msg.textContent,/fresh salon photo/);
- await t.openCamera();assert.equal(t.video.hidden,false);await t.snap();assert.equal(t.elements.photo_nonce.value,'fresh-nonce');assert.equal(t.elements.latitude.value,23);assert.equal(t.preview.hidden,false);assert.equal(t.stopped,1);
+ assert.equal(t.open.textContent,'Open Camera');assert.equal(t.capture.hidden,true);await t.openCamera();assert.equal(t.video.hidden,false);assert.equal(t.open.textContent,'Retake');assert.equal(t.capture.hidden,false);await t.snap();assert.equal(t.open.textContent,'Retake');assert.equal(t.capture.hidden,true);assert.equal(t.elements.photo_nonce.value,'fresh-nonce');assert.equal(t.elements.latitude.value,23);assert.equal(t.preview.hidden,false);assert.equal(t.stopped,1);
  prevented=false;t.handlers.submit({preventDefault(){prevented=true;},stopImmediatePropagation(){}});assert.equal(prevented,false);
- t.handlers.businesschange();assert.equal(t.elements.photo_data.value,'');assert.equal(t.elements.photo_nonce.value,'');assert.equal(t.preview.hidden,true);
+ t.handlers.businesschange();assert.equal(t.elements.photo_data.value,'');assert.equal(t.elements.photo_nonce.value,'');assert.equal(t.preview.hidden,true);assert.equal(t.open.textContent,'Open Camera');
  await t.openCamera();t.handlers.pagehide();assert.equal(t.stopped,2);
- t=setup({denyCamera:true});await t.openCamera();assert.equal(t.elements.photo_data.value,'');assert.match(t.msg.textContent,/Allow camera permission/);assert.equal(t.open.disabled,false);
+ t=setup({denyCamera:true});await t.openCamera();assert.equal(t.elements.photo_data.value,'');assert.match(t.msg.textContent,/Allow camera permission/);assert.equal(t.open.disabled,false);assert.equal(t.open.textContent,'Open Camera');assert.equal(t.capture.hidden,true);
  t=setup({denyGps:true});await t.openCamera();await t.snap();assert.equal(t.requests,0);assert.equal(t.elements.photo_nonce.value,'');assert.equal(t.capture.disabled,false);
  t=setup({challengeStatus:400});await t.openCamera();await t.snap();assert.equal(t.elements.photo_data.value,'');assert.match(t.msg.textContent,/GPS accuracy/);
  console.log('PASS camera capture, GPS, photo-required, business-change reset, permission denial, failed challenge, and stream cleanup');
