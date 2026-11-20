@@ -149,6 +149,32 @@ class DeviceCameraTests(unittest.TestCase):
         self.assertEqual(self.client.get('/command-center/devices').status_code,200)
         with SessionLocal() as db:self.assertEqual(db.query(AuditLog).filter_by(action='DEVICE_BOOTSTRAP').count(),1)
 
+    def test_super_admin_keeps_multiple_browsers_and_manual_revocation(self):
+        from database.models import User
+        from modules.security import hash_password
+        with SessionLocal.begin() as db:
+            root=User(full_name='Root',email='root@example.test',role='SUPER_ADMIN',password_hash=hash_password('Test-only-password-123'))
+            db.add(root); db.flush(); root_id=root.id
+        other=TestClient(app)
+        try:
+            for browser in (self.client,other):
+                response=browser.post('/login',data={'email':'root@example.test','password':'Test-only-password-123'},follow_redirects=False)
+                self.assertEqual(response.headers['location'],'/workspace')
+            self.assertEqual(self.client.get('/command-center/devices').status_code,200)
+            self.assertEqual(other.get('/command-center/devices').status_code,200)
+            with SessionLocal.begin() as db:
+                devices=db.query(EmployeeDevice).filter_by(user_id=root_id).order_by(EmployeeDevice.id).all()
+                self.assertEqual([d.status for d in devices],['APPROVED','APPROVED'])
+                devices[0].status='REVOKED'
+                db.add(AuditLog(user_id=root_id,entity_type='EmployeeDevice',entity_id=devices[0].id,action='DEVICE_REVOKE',new_value='Super Admin bootstrap on replacement browser'))
+            self.assertIn('APPROVED',self.client.get('/device-access').text)
+            with SessionLocal.begin() as db:
+                first=db.query(EmployeeDevice).filter_by(user_id=root_id).order_by(EmployeeDevice.id).first()
+                first.status='REVOKED'
+                db.add(AuditLog(user_id=root_id,entity_type='EmployeeDevice',entity_id=first.id,action='DEVICE_REVOKE',new_value='REVOKED'))
+            self.assertIn('REVOKED',self.client.get('/device-access').text)
+        finally: other.close()
+
     def test_another_employee_cannot_reuse_camera_challenge(self):
         self.login('a');self.punch_in_for_test(2,3);data=photo_form(self)
         self.login('b');data['csrf']=self.csrf
