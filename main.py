@@ -41,9 +41,14 @@ def approved_session(request: Request):
 async def lifespan(app):
     from modules.auto_attendance import attendance_clock
     clock = asyncio.create_task(attendance_clock())
+    from modules.web_push import push_clock
+    push = asyncio.create_task(push_clock())
     try:
         yield
     finally:
+        push.cancel()
+        with suppress(asyncio.CancelledError):
+            await push
         clock.cancel()
         with suppress(asyncio.CancelledError):
             await clock
@@ -57,6 +62,8 @@ from modules.device_access import router as device_router
 from modules.visit_camera import router as camera_router
 app.include_router(device_router)
 app.include_router(camera_router)
+from modules.web_push import router as push_router
+app.include_router(push_router)
 
 app.add_middleware(
     SessionMiddleware,
@@ -246,6 +253,11 @@ def login(
                 status_code=401
             )
 
+        # Switching accounts in the same browser must stop the previous account's push.
+        from modules.device_access import current_device
+        from database.models import WebPushSubscription
+        previous=current_device(db,request)
+        if previous:db.query(WebPushSubscription).filter_by(device_id=previous.id,user_id=previous.user_id).update({'enabled':False})
         request.session.clear()
 
         request.session["user_id"] = user.id
@@ -257,7 +269,7 @@ def login(
         from modules.device_access import enroll, cookie
         db.query(User).filter_by(id=user.id).with_for_update().one()
         device, raw = enroll(db, request, user)
-        destination = '/workspace' if device.status == 'APPROVED' else '/device-access'
+        destination = '/permissions' if device.status == 'APPROVED' else '/device-access'
         db.commit()
         return cookie(RedirectResponse(destination, status_code=303), raw)
 
@@ -318,7 +330,12 @@ def command_center(request: Request):
 
 @app.get("/logout")
 def logout(request: Request):
-
+    if request.session.get('user_id'):
+        from modules.device_access import current_device
+        from database.models import WebPushSubscription
+        with SessionLocal.begin() as db:
+            device=current_device(db,request)
+            if device:db.query(WebPushSubscription).filter_by(user_id=device.user_id,device_id=device.id).update({'enabled':False})
     request.session.clear()
 
     return RedirectResponse("/", status_code=303)

@@ -179,3 +179,33 @@ class VisitPhoto(Base):
     accuracy = Column(Float, nullable=False)
     digest = Column(String(64), unique=True, nullable=False)
     jpeg = Column(LargeBinary, nullable=False)
+
+class WebPushKey(Base):
+    __tablename__='web_push_keys'
+    id=Column(Integer,primary_key=True)
+    private_key=Column(Text,nullable=False)
+    public_key=Column(Text,nullable=False)
+
+class WebPushSubscription(Base):
+    __tablename__='web_push_subscriptions'
+    id=Column(Integer,primary_key=True)
+    user_id=Column(Integer,ForeignKey('users.id'),nullable=False,index=True)
+    device_id=Column(Integer,ForeignKey('employee_devices.id'),nullable=False,index=True)
+    credential_fingerprint=Column(String(64),nullable=False)
+    endpoint=Column(Text,nullable=False)
+    endpoint_hash=Column(String(64),nullable=False,unique=True)
+    p256dh=Column(Text,nullable=False)
+    auth=Column(Text,nullable=False)
+    enabled=Column(Boolean,nullable=False,default=True)
+    created_at=Column(DateTime,nullable=False)
+    last_test_at=Column(DateTime)
+
+class WebPushDelivery(Base):
+    __tablename__='web_push_deliveries'
+    id=Column(Integer,primary_key=True)
+    subscription_id=Column(Integer,ForeignKey('web_push_subscriptions.id'),nullable=False)
+    event_key=Column(String(64),nullable=False)
+    delivered=Column(Boolean,nullable=False,default=False)
+    attempts=Column(Integer,nullable=False,default=0)
+    retry_at=Column(DateTime)
+    __table_args__=(UniqueConstraint('subscription_id','event_key'),)

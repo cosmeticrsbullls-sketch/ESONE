@@ -67,7 +67,7 @@ def access_page(request: Request):
         device, raw = enroll(db, request, user)
         body = f'<h2>Device approval</h2><p>Request #{device.id} · <strong>{escape(device.status)}</strong></p><p>Browser: {escape(device.label)}</p><p>New browsers require Command Center approval. Super Admin may use multiple browsers. For other users, approval of a replacement revokes the previous browser.</p>'
         if device.status == 'APPROVED':
-            body += '<a href="/workspace">Continue to ESONE</a>'
+            body += '<a href="/permissions">Continue to ESONE</a>'
         else:
             body += '<p>Ask Command Center to verify you and approve this request.</p><a href="/device-access">Refresh approval status</a>'
             if device.status in {'REJECTED', 'REVOKED'}:
