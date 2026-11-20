@@ -19,7 +19,7 @@ router=APIRouter()
 
 
 def widget():
-    return '''<section class="visit-camera"><h3>Fresh salon photo</h3><p>Use the rear camera to photograph the salon. Gallery upload is unavailable. Allow camera and location permissions.</p><video autoplay muted playsinline hidden style="width:100%;max-width:480px"></video><img alt="Salon photo preview" hidden style="width:100%;max-width:480px"><input type="hidden" name="photo_nonce"><input type="hidden" name="photo_data"><button type="button" data-camera-open>Open camera / Retake</button><button type="button" data-camera-capture hidden>Capture salon photo</button><p data-camera-message role="status" aria-live="polite"></p></section><script src="/visit-camera.js?v=1" defer></script>'''
+    return '''<section class="visit-camera"><h3>Fresh salon photo</h3><p>Use the rear camera to photograph the salon. Gallery upload is unavailable. Allow camera and location permissions.</p><video autoplay muted playsinline hidden style="width:100%;max-width:480px"></video><img alt="Salon photo preview" hidden style="width:100%;max-width:480px"><input type="hidden" name="photo_nonce"><input type="hidden" name="photo_data"><button type="button" data-camera-open>Open Camera</button><button type="button" data-camera-capture hidden>Capture</button><p data-camera-message role="status" aria-live="polite"></p></section><script src="/visit-camera.js?v=2" defer></script>'''
 
 
 @router.get('/visit-camera.js', include_in_schema=False)

@@ -3,7 +3,7 @@
  const form=box.closest('form'), video=box.querySelector('video'), preview=box.querySelector('img'), open=box.querySelector('[data-camera-open]'), capture=box.querySelector('[data-camera-capture]'), msg=box.querySelector('[data-camera-message]');
  let stream=null, busy=false, generation=0;
  function stop(){stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;video.hidden=true;capture.hidden=true;}
- function reset(){generation++;stop();form.elements.photo_data.value='';form.elements.photo_nonce.value='';preview.hidden=true;msg.textContent='';}
+ function reset(){generation++;stop();form.elements.photo_data.value='';form.elements.photo_nonce.value='';preview.hidden=true;open.textContent='Open Camera';msg.textContent='';}
  form.addEventListener('businesschange',reset);
  window.addEventListener('pagehide',reset);
  open.addEventListener('click',async()=>{
@@ -12,8 +12,8 @@
    if(!navigator.mediaDevices?.getUserMedia)throw new Error('Camera requires HTTPS and a supported browser.');
    const openedStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:960},height:{ideal:720}}});
    if(attempt!==generation){openedStream.getTracks().forEach(t=>t.stop());return;}
-   stream=openedStream;video.srcObject=stream;video.hidden=false;await video.play();if(attempt!==generation){stop();return;}capture.hidden=false;msg.textContent='Frame the salon and tap Capture salon photo.';
-  }catch(error){stop();msg.textContent='Allow camera permission, then retry. '+error.message;}
+   stream=openedStream;video.srcObject=stream;video.hidden=false;await video.play();if(attempt!==generation){stop();return;}capture.hidden=false;open.textContent='Retake';msg.textContent='Frame the salon and tap Capture.';
+  }catch(error){stop();open.textContent='Open Camera';msg.textContent='Allow camera permission, then retry. '+error.message;}
   finally{busy=false;open.disabled=false;}
  });
  capture.addEventListener('click',async()=>{
