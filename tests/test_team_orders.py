@@ -84,12 +84,14 @@ class TeamOrderTests(unittest.TestCase):
 
     def test_sales_demo_free_name_edit_availability_and_owner(self):
         self.punch_in_for_test(2,3)
-        self.login('a');d=self.form('/demos/new');scheduled=datetime.now(ZoneInfo('Asia/Kolkata'))+timedelta(days=1)
+        self.login('a');d=self.form('/demos/new?demo_day=2028-02-29');scheduled=datetime.now(ZoneInfo('Asia/Kolkata'))+timedelta(days=1)
         d.update(client_id=1,educator_name='Guest Educator',educator_id=0,treatment='NanoBeen',demo_at=scheduled.strftime('%Y-%m-%dT%H:%M'))
         response = self.client.post('/demos', data=d, follow_redirects=False)
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers['location'], '/demo-requests')
-        self.assertIn('Pending approval', self.client.get('/demo-requests').text)
+        confirmation=self.client.get('/demo-requests').text
+        self.assertIn('Request submitted — Approval Pending',confirmation)
+        self.assertIn('Pending approval',confirmation)
         self.assertEqual(self.client.post('/demos', data=d).status_code, 409)
 
         review_url = '/command-center/demo-requests/1'
@@ -99,7 +101,7 @@ class TeamOrderTests(unittest.TestCase):
         self.assertNotIn('Guest Educator', self.client.get('/demo-requests').text)
         self.assertEqual(self.client.get(availability_url).json()['bookings'], [])
         self.assertEqual(self.client.get('/command-center/demo-requests').status_code, 403)
-        csrf = self.form('/demos/new')['csrf']
+        csrf = self.form('/demos/new?demo_day=2028-02-29')['csrf']
         self.assertEqual(self.client.post(review_url, data={'csrf': csrf, 'decision': 'APPROVED'}).status_code, 403)
 
         self.client.get('/logout')
@@ -121,19 +123,21 @@ class TeamOrderTests(unittest.TestCase):
         url = booking_link.group(1)
         self.assertIn('Guest Educator',self.client.get(url).text)
         available=self.client.get('/demo-availability?day='+str(scheduled.date())).json();self.assertEqual(len(available['bookings']),1);self.assertEqual(available['bookings'][0]['educator'],'Guest Educator')
-        self.assertIn('Guest Educator',self.client.get('/demos/new?demo_day='+str(scheduled.date())).text)
+        details=self.client.get('/demos/new?demo_day='+str(scheduled.date())).text
+        self.assertIn('id="date-bookings"',details)
+        self.assertIn('/demo-availability?day=',details)
         edit=self.form(url);edit.update(educator_name='Edited Educator')
         self.assertEqual(self.client.post(url+'/educator',data=edit,follow_redirects=False).status_code,303)
         self.assertIn('Edited Educator',self.client.get(url).text)
         self.client.get('/logout');self.login('b');self.assertEqual(self.client.get(url).status_code,403)
         self.assertIn('Edited Educator', self.client.get('/demos?day='+str(scheduled.date())).text)
-        edit['csrf']=self.form('/demos/new')['csrf'];self.assertEqual(self.client.post(url+'/educator',data=edit).status_code,403)
+        edit['csrf']=self.form('/demos/new?demo_day=2028-02-29')['csrf'];self.assertEqual(self.client.post(url+'/educator',data=edit).status_code,403)
         self.assertEqual(self.client.post(url,data={**edit,'action':'CANCEL','notes':'Cancel'}).status_code,403)
 
     def test_demo_rejection_reason_is_visible_only_in_request_tracking(self):
         self.punch_in_for_test(2)
         self.login('a')
-        booking = self.form('/demos/new')
+        booking = self.form('/demos/new?demo_day=2028-02-29')
         scheduled = datetime.now(ZoneInfo('Asia/Kolkata')) + timedelta(days=1)
         booking.update(client_id=1, educator_name='Guest', treatment='NanoBeen',
                        demo_at=scheduled.strftime('%Y-%m-%dT%H:%M'))
@@ -189,7 +193,7 @@ class TeamOrderTests(unittest.TestCase):
         self.login('b')
         results = self.client.get('/business-search?q=shared').json()['matches']
         self.assertEqual(results[0]['name'], 'New Shared Salon')
-        for url in ['/orders/new', '/demos/new', '/field/intake']:
+        for url in ['/orders/new', '/demos/new?demo_day=2028-02-29', '/field/intake']:
             self.assertIn('New Shared Salon' if url != '/field/intake' else 'Search registered entries',
                           self.client.get(url).text)
 

@@ -9,7 +9,7 @@ from database.models import Activity, Client, DemoBooking, User, DemoEducator
 from modules.operations import business_today
 
 
-def calendar_view(db, month='', educator_id=0, day=None, q='', status=''):
+def calendar_view(db, month='', educator_id=0, day=None, q='', status='', *, booking=False, client_id=0):
     today=business_today()
     try:
         first=date.fromisoformat(month+'-01') if month else (day or today).replace(day=1)
@@ -28,10 +28,11 @@ def calendar_view(db, month='', educator_id=0, day=None, q='', status=''):
     counts=Counter(d.demo_date.date() for d,a,c,u in all_records if a.status!='CANCELLED')
     def link(target_month, selected_day=None):
         params={'month':target_month.strftime('%Y-%m'),'educator_id':educator_id}
-        if selected_day:params['day']=selected_day.isoformat()
+        if selected_day:params['demo_day' if booking else 'day']=selected_day.isoformat()
+        if booking and client_id:params['client_id']=client_id
         if q:params['q']=q
         if status:params['status']=status
-        return '/demos?'+escape(urlencode(params),quote=True)
+        return ('/demos/new?' if booking else '/demos?')+escape(urlencode(params),quote=True)
     cells=''.join(f'<div class="weekday">{name}</div>' for name in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])
     for week in calendar.Calendar(firstweekday=0).monthdayscalendar(first.year,first.month):
         for number in week:
@@ -40,6 +41,9 @@ def calendar_view(db, month='', educator_id=0, day=None, q='', status=''):
             current=first.replace(day=number);count=counts[current]
             classes='calendar-day'+(' booked' if count else '')+(' today' if current==today else '')+(' selected' if current==day else '')
             label=f'{current.strftime("%d %B %Y")}: {count} demos booked'
+            if booking and current<today:
+                cells+=f'<span class="{classes} past" aria-label="{label} — past date" aria-disabled="true"><strong>{number}</strong><small>Past date</small></span>'
+                continue
             cells+=f'<a class="{classes}" href="{link(first,current)}" aria-label="{label}" data-date="{current}" data-demo-count="{count}"><strong>{number}</strong><small>{str(count)+" demo"+("s" if count!=1 else "") if count else "No demos"}</small></a>'
     options='<option value="0">All educators</option>'+''.join(f'<option value="{u.id}" {"selected" if u.id==educator_id else ""}>{escape(u.full_name)}</option>' for u in people)
     statuses='<option value="">All statuses</option>'+''.join(f'<option {"selected" if value==status else ""}>{value}</option>' for value in ['BOOKED','IN_PROGRESS','COMPLETED','CANCELLED'])
@@ -53,10 +57,13 @@ def calendar_view(db, month='', educator_id=0, day=None, q='', status=''):
         shown+=1
         rows+=f'<tr><td><a href="/demos/{d.id}">#{d.id}</a></td><td>{escape(c.business_name)}</td><td>{escape(d.product_or_treatment or "")}</td><td>{d.demo_date.strftime("%d %b %Y · %I:%M %p")}</td><td>{escape(names.get(d.id,u.full_name if u else "Unassigned"))}</td><td>{escape(a.status)}</td><td>{escape(d.conversion_status or "")}</td></tr>'
     selected_day=day or (today if (today.year,today.month)==(first.year,first.month) else first)
-    book_params={'demo_day':selected_day.isoformat(),'educator_id':educator_id}
+    book_params={'educator_id':educator_id}
+    if day:book_params['demo_day']=selected_day.isoformat()
     book_url='/demos/new?'+escape(urlencode(book_params),quote=True)
     heading=day.strftime('%d %B %Y') if day else first.strftime('%B %Y')
     prev_link=f'<a href="{link(previous)}">← Previous</a>' if previous.year>=1900 else '<span></span>'
     next_link=f'<a href="{link(following)}">Next →</a>' if following.year<=2100 else '<span></span>'
     book_action=f'<a class="primary" href="{book_url}">+ Book Demo {"on "+day.strftime("%d %b") if day else ""}</a>' if selected_day>=today else '<span>Past dates are shown for history.</span>'
+    if booking:
+        return f'''<h2>1. Select demo date</h2><p>Choose a date on the calendar to continue to business, treatment, time and educator.</p><form class="calendar-toolbar" action="/demos/new"><label>Month <input type="month" name="month" value="{first.strftime('%Y-%m')}" min="1900-01" max="2100-12"></label><input type="hidden" name="client_id" value="{client_id}"><input type="hidden" name="educator_id" value="{educator_id}"><button>Show Month</button></form><section class="calendar-panel" aria-label="Select demo date"><div class="calendar-header">{prev_link}<h2>{first.strftime('%B %Y')}</h2>{next_link}</div><div class="calendar-grid">{cells}</div><p>Gold dates have approved demos booked. Selecting a date does not reserve a time. All times are India time.</p></section>'''
     return f'''<div class="actions">{book_action}<a class="secondary" href="/operations?kind=demos">History / Excel</a></div><form class="calendar-toolbar"><label>Month <input type="month" name="month" value="{first.strftime('%Y-%m')}" min="1900-01" max="2100-12"></label><label>Educator <select name="educator_id">{options}</select></label><label>Search <input name="q" value="{escape(q,quote=True)}" placeholder="Salon / phone"></label><label>Status <select name="status">{statuses}</select></label><button>Show Calendar</button></form><section class="calendar-panel" aria-label="Demo booking calendar"><div class="calendar-header">{prev_link}<h2>{first.strftime('%B %Y')}</h2>{next_link}</div><div class="calendar-grid">{cells}</div><p class="calendar-legend">Gold days have demos booked · Top blue line marks today · Click a day for its bookings.</p><p class="calendar-legend">Highlights include all non-cancelled demos for the chosen educator. No demos means no bookings recorded; check times before confirming availability. All demo times are India time.</p></section><div class="section-heading"><h2>{heading} · {shown} booking{'s' if shown!=1 else ''}</h2><a href="{link(first)}">Show whole month</a></div><div class="table"><table><tr><th>ID</th><th>Salon</th><th>Treatment</th><th>Date / time (India)</th><th>Educator</th><th>Status</th><th>Result</th></tr>{rows or '<tr><td colspan="7">No matching bookings. Choose a day and Book Demo to add one.</td></tr>'}</table></div>'''
