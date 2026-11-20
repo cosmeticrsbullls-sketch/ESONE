@@ -28,7 +28,7 @@ class WorkflowTests(unittest.TestCase):
         return data
 
     def booking(self):
-        data=self.form('/demos/new')
+        data=self.form('/demos/new?demo_day=2028-02-29')
         data.update(client_id=1,educator_id=2,treatment='NanoBeen',demo_at=(datetime.now(ZoneInfo('Asia/Kolkata'))+timedelta(days=1)).strftime('%Y-%m-%dT%H:%M'),notes='Booking notes')
         return data
 

@@ -23,6 +23,35 @@ class CalendarTests(unittest.TestCase):
                 db.add(a);db.flush();db.add(DemoBooking(id=index,activity_id=a.id,demo_date=datetime.fromisoformat(scheduled),product_or_treatment='NanoBeen',assigned_educator_id=educator))
             db.commit()
 
+    def test_book_demo_opens_calendar_before_details(self):
+        self.login();self.seed_demos()
+        response=self.client.get('/demos/new?month=2028-02&client_id=1&educator_id=2')
+        self.assertEqual(response.status_code,200)
+        self.assertIn('1. Select demo date',response.text)
+        self.assertNotIn('id="demo-booking"',response.text)
+        self.assertIn('/demos/new?month=2028-02&amp;educator_id=2&amp;demo_day=2028-02-29&amp;client_id=1',response.text)
+        self.assertIn('/demos/new?month=2028-03&amp;educator_id=2&amp;client_id=1',response.text)
+        self.assertIn('data-date="2028-02-29" data-demo-count="1"',response.text)
+        with SessionLocal() as db:self.assertEqual(db.query(DemoBooking).count(),4)
+
+    def test_selected_date_opens_simple_details_with_submit(self):
+        self.login()
+        response=self.client.get('/demos/new?demo_day=2028-02-29&client_id=1&educator_id=2')
+        self.assertIn('2. Demo details',response.text)
+        self.assertIn('value="2028-02-29T10:00"',response.text)
+        self.assertIn('>Submit</button>',response.text)
+        self.assertIn('Change date',response.text)
+        self.assertNotIn('calendar-grid',response.text)
+        self.assertIn('value="1" selected>',response.text)
+        self.assertIn('value="2" selected>Sales A',response.text)
+
+    def test_booking_calendar_rejects_past_dates_and_invalid_month(self):
+        self.login()
+        self.assertEqual(self.client.get('/demos/new?demo_day=2020-01-01').status_code,400)
+        self.assertEqual(self.client.get('/demos/new?month=invalid').status_code,400)
+        self.assertEqual(self.client.get('/demos/new?demo_day=2028-02-30').status_code,422)
+        self.assertEqual(self.client.get('/demos/new?educator_id=999').status_code,400)
+
     def test_calendar_highlights_dates_and_filters_educator(self):
         self.login();self.seed_demos()
         response=self.client.get('/demos?month=2028-02')
@@ -57,7 +86,7 @@ class CalendarTests(unittest.TestCase):
     def test_empty_business_options_direct_registration_to_home(self):
         self.login()
         with SessionLocal() as db:db.query(Client).delete();db.commit()
-        response=self.client.get('/demos/new')
+        response=self.client.get('/demos/new?demo_day=2028-02-29')
         self.assertIn('No businesses registered',response.text);self.assertIn('Add Business on Home',response.text)
         self.assertIn('Search business / mobile',response.text)
         self.assertIn('name="client_id" required',response.text)
@@ -70,7 +99,9 @@ class CalendarTests(unittest.TestCase):
         response=self.client.post('/clients/create',data=data,follow_redirects=False)
         self.assertEqual(response.status_code,303)
         self.assertRegex(response.headers['location'],r'^/demos/new\?client_id=\d+$')
-        self.assertIn('New Test Salon',self.client.get(response.headers['location']).text)
+        calendar=self.client.get(response.headers['location'])
+        self.assertIn('1. Select demo date',calendar.text)
+        self.assertIn('New Test Salon',self.client.get(response.headers['location']+'&demo_day=2028-02-29').text)
         response=self.client.post('/clients/create',data={**data,'business_name':'Other Salon','return_to':'https://evil.example'},follow_redirects=False)
         self.assertEqual(response.headers['location'],'/clients')
         self.assertEqual(self.client.post('/clients/create',data={**data,'business_name':'   '}).status_code,400)

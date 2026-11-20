@@ -178,19 +178,27 @@ def demos(request:Request,status:str='',q:str='',month:str='',educator_id:int=0,
     return page('Demo Bookings',content)
 
 @router.get('/demos/new',response_class=HTMLResponse)
-def demo_form(request:Request, client_id:int=0, demo_day:date|None=None, educator_id:int=0):
+def demo_form(request:Request, client_id:int=0, demo_day:date|None=None, educator_id:int=0, month:str=""):
     denied=demo_access(request)
     if denied is not None:return denied
     with SessionLocal() as db:
         from modules.demo_calendar import calendar_view
-        calendar=calendar_view(db,day=demo_day)
+        if demo_day is None:
+            try: calendar=calendar_view(db,month=month,educator_id=educator_id,booking=True,client_id=client_id)
+            except ValueError as error:return HTMLResponse(escape(str(error)),400)
+            return page('Book Demo',calendar)
+        if demo_day<business_today():return HTMLResponse('Choose today or a future demo date.',400)
+        if not 1900<=demo_day.year<=2100:return HTMLResponse('Choose a valid demo date.',400)
+        if educator_id:
+            educator=db.get(User,educator_id)
+            if not educator or not educator.is_active:return HTMLResponse('Choose an active educator.',400)
         clients=clients_select(db,client_id)
         people='<option value="0" '+('selected' if not educator_id else '')+'>Optional registered educator</option>'+''.join(f'<option value="{u.id}" {"selected" if u.id==educator_id else ""}>{escape(u.full_name)}</option>' for u in db.query(User).filter_by(is_active=True).order_by(User.full_name).all())
     date_script='''<script>const input=document.querySelector('input[name=demo_at]');const output=document.querySelector('#date-bookings');let requestNo=0;async function refreshBookings(){const seq=++requestNo;const day=input.value.slice(0,10);if(!day)return;output.textContent='Checking booked demos…';try{const r=await fetch('/demo-availability?day='+encodeURIComponent(day));if(!r.ok)throw Error();const result=await r.json();if(seq!==requestNo)return;output.replaceChildren();const title=document.createElement('strong');title.textContent=result.bookings.length+' demos booked on '+day;output.append(title);result.bookings.forEach(item=>{const row=document.createElement('div');row.textContent=item.time+' · '+item.salon+' · '+item.educator+' · '+item.status;output.append(row);});}catch(e){if(seq===requestNo)output.textContent='Could not check bookings. Open demo calendar before confirming.';}}input.addEventListener('change',refreshBookings);input.addEventListener('input',refreshBookings);document.querySelectorAll('[data-date]').forEach(d=>d.addEventListener('click',()=>setTimeout(refreshBookings,0)));if(input.value)refreshBookings();</script>'''
     direct_booking = request.session['role'] in OFFICE_ROLES
-    submit_label = 'Book Demo' if direct_booking else 'Request Demo Booking'
+    submit_label = 'Submit'
     approval_notice = '' if direct_booking else '<p>Command Center approval is required before the demo appears on the calendar.</p>'
-    return page('Book Demo',approval_notice+f'''<details open><summary>Already booked demos - choose a day</summary>{calendar}</details><p><a class="secondary" href="/demos">View demo calendar</a></p><form id="demo-booking" method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients, "/demos/new")}<label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" value="{str(demo_day)+'T10:00' if demo_day and demo_day>=business_today() else ''}" required></label><label>Registered educator <select name="educator_id">{people}</select></label><label>Educator name<input name="educator_name" maxlength="150" placeholder="Enter any educator name"></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>{submit_label}</button></form><p id="date-bookings" aria-live="polite"></p><script>document.querySelectorAll("[data-date]").forEach(day=>day.addEventListener("click",e=>{{e.preventDefault();document.querySelector("input[name=demo_at]").value=day.dataset.date+"T10:00";document.querySelector("#date-bookings").textContent=day.dataset.demoCount+" demos already booked on "+day.dataset.date+". Check times in calendar before booking.";document.querySelector("#demo-booking").scrollIntoView({{behavior:"smooth"}});}}));</script>'''+date_script)
+    return page('Book Demo',approval_notice+f'''<h2>2. Demo details</h2><p>Selected date: <strong>{demo_day.strftime('%d %B %Y')}</strong> · <a href="/demos/new?month={demo_day.strftime('%Y-%m')}&amp;client_id={client_id}&amp;educator_id={educator_id}">Change date</a></p><form id="demo-booking" method="post" action="/demos">{hidden(request)}<input type="hidden" name="submission" value="{token_urlsafe(24)}">{salon_field(clients, "/demos/new")}<label>Treatment <select name="treatment"><option value="NanoBeen">NanoBeen / Nanoplastia</option><option value="BeenBotox">BeenBotox / Hair Botox</option><option value="KeraBeen">KeraBeen / Keratin</option><option value="OTHER">Other treatment</option></select></label><label data-when="other">Other treatment name <input name="custom_treatment" maxlength="200" placeholder="Enter treatment name"></label><label>Demo date / time (India) <input name="demo_at" type="datetime-local" value="{str(demo_day)+'T10:00' if demo_day and demo_day>=business_today() else ''}" required></label><label>Registered educator <select name="educator_id">{people}</select></label><label>Educator name<input name="educator_name" maxlength="150" placeholder="Enter any educator name"></label><label>Notes <textarea name="notes" maxlength="4000"></textarea></label><button>{submit_label}</button></form><p id="date-bookings" aria-live="polite"></p>'''+date_script)
 
 @router.post('/demos')
 def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(0),treatment:str=Form(...),demo_at:str=Form(...),notes:str=Form(''),csrf:str=Form(''),submission:str=Form(''),custom_treatment:str=Form(''),educator_name:str=Form('')):
@@ -225,6 +233,7 @@ def book_demo(request:Request,client_id:int=Form(...),educator_id:int=Form(0),tr
             db.add(pending)
             db.flush()
             audit(db, request, 'DemoBookingRequest', pending.id, 'DEMO_REQUESTED', new=submission)
+            request.session['demo_booking_notice']='Request submitted — Approval Pending'
             destination = '/demo-requests'
     return RedirectResponse(destination, 303)
 
@@ -309,7 +318,9 @@ def demo_request_list(request, *, review):
             cards.append(f'<article class="card">{detail}</article>')
     title = 'Demo Booking Approvals' if review else 'My Demo Requests'
     empty = 'No requests are awaiting approval.' if review else 'You have no demo requests.'
-    return HTMLResponse(page(title, ''.join(cards) or f'<p>{empty}</p>'),
+    message=request.session.pop('demo_booking_notice',None) if not review else None
+    confirmation=f'<p class="notice" role="status">{escape(message)}</p>' if message else ''
+    return HTMLResponse(page(title, confirmation+(''.join(cards) or f'<p>{empty}</p>')),
                         headers={'Cache-Control': 'no-store'})
 
 
