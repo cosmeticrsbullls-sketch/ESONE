@@ -73,7 +73,7 @@ def notifications(request:Request):
 .notification-open:hover{background:#f6e9c8}
 .notification-open:active{background:#e8d29d;transform:translateY(1px)}
 </style>'''
-    content+='<p><a href="/permissions?manage=1">Set up browser permissions / notifications</a></p>'
+    if request.session.get('role')!='SUPER_ADMIN':content+='<p><a href="/permissions?manage=1">Set up browser permissions / notifications</a></p>'
     content+=f'<p>{len(items)} activity and pending reminders. Business date {business_today()} (India).</p><form method="post">{hidden(request)}<button>Mark current updates read</button></form>'
     content+=''.join(f'<article class="card notification-row"><strong>{"New · " if stamp>read_at else ""}{escape(title)}</strong><a class="notification-open" href="{escape(url,quote=True)}" aria-label="Open details: {escape(title,quote=True)}" title="Open details">{action_svg("open")}</a></article>' for title,url,stamp in items) or '<p>No activities or pending reminders.</p>'
     return page('Notifications / Messages',content)

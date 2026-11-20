@@ -25,8 +25,11 @@ def approved_session(request: Request):
         if not user or not user.is_active or request.session.get('credential_fingerprint','')!=fingerprint:
             request.session.clear()
             raise HTTPException(status_code=303,headers={'Location':'/login'})
+        from modules.access_policy import allowed
+        if request.url.path not in {'/login','/logout','/','/access-type-denied'} and not request.url.path.startswith(('/assets/','/static/')) and not allowed(db,user,request):
+            raise HTTPException(status_code=303,headers={'Location':'/access-type-denied'})
         from modules.device_access import current_device
-        if request.url.path not in {'/login','/logout','/','/device-access','/device-access/request'} and not request.url.path.startswith(('/assets/','/static/')):
+        if request.url.path not in {'/login','/logout','/','/device-access','/device-access/request','/access-type-denied'} and not request.url.path.startswith(('/assets/','/static/')):
             device=current_device(db,request)
             if not device or device.status!='APPROVED':
                 raise HTTPException(status_code=303,headers={'Location':'/device-access'})
@@ -64,6 +67,8 @@ app.include_router(device_router)
 app.include_router(camera_router)
 from modules.web_push import router as push_router
 app.include_router(push_router)
+from modules.access_policy import router as access_policy_router
+app.include_router(access_policy_router)
 
 app.add_middleware(
     SessionMiddleware,
@@ -253,6 +258,9 @@ def login(
                 status_code=401
             )
 
+        from modules.access_policy import allowed,access_type,LABELS
+        if not allowed(db,user,request):
+            return HTMLResponse(login_page('This account is '+LABELS[access_type(db,user)]+'. Use the permitted device or contact Super Admin.'),403)
         # Switching accounts in the same browser must stop the previous account's push.
         from modules.device_access import current_device
         from database.models import WebPushSubscription
@@ -269,7 +277,7 @@ def login(
         from modules.device_access import enroll, cookie
         db.query(User).filter_by(id=user.id).with_for_update().one()
         device, raw = enroll(db, request, user)
-        destination = '/permissions' if device.status == 'APPROVED' else '/device-access'
+        destination = ('/workspace' if user.role=='SUPER_ADMIN' else '/permissions') if device.status=='APPROVED' else '/device-access'
         db.commit()
         return cookie(RedirectResponse(destination, status_code=303), raw)
 
@@ -350,6 +358,9 @@ def users_page(request: Request):
 
     from modules.workflows import hidden
     users = get_all_users()
+    from modules.access_policy import access_type as user_access_type,LABELS
+    with SessionLocal() as db:
+        access_labels={user.id:LABELS[user_access_type(db,user)] for user in users}
 
     rows = ""
 
@@ -362,6 +373,7 @@ def users_page(request: Request):
             <td>{escape(str(user.email))}</td>
             <td>{escape(str(user.role))}</td>
             <td>{status}</td>
+            <td>{access_labels[user.id]} · <a href="/command-center/access/{user.id}">Access / Reset Device</a></td>
             <td>{f'<a href="/command-center/passwords/{user.id}">Reset password</a>' if user.id != request.session["user_id"] and user.is_active else "—"}</td>
         </tr>
         """
@@ -519,6 +531,8 @@ def users_page(request: Request):
                         <option value="MANAGEMENT">Management</option>
                     </select>
 
+                    <label>Access type</label>
+                    <select name="access_type" required><option value="" disabled selected>Select access type</option><option value="MOBILE">Mobile Only</option><option value="WEB">Computer / Web Only</option><option value="BOTH">Both</option></select>
                     <button type="submit">
                         CREATE USER
                     </button>
@@ -538,7 +552,7 @@ def users_page(request: Request):
                             <th>Name</th>
                             <th>Email</th>
                             <th>Role</th>
-                            <th>Status</th><th>Account action</th>
+                            <th>Status</th><th>Device access</th><th>Account action</th>
                         </tr>
                     </thead>
 
@@ -564,6 +578,7 @@ def create_es1_user(
     email: str = Form(...),
     password: str = Form(...),
     role: str = Form(...),
+    access_type: str = Form(""),
     csrf: str = Form("")
 ):
 
@@ -581,7 +596,8 @@ def create_es1_user(
         full_name,
         email,
         password,
-        role
+        role,
+        access_type
     )
 
     if not success:

@@ -209,3 +209,10 @@ class WebPushDelivery(Base):
     attempts=Column(Integer,nullable=False,default=0)
     retry_at=Column(DateTime)
     __table_args__=(UniqueConstraint('subscription_id','event_key'),)
+
+class UserAccessPolicy(Base):
+    __tablename__='user_access_policies'
+    user_id=Column(Integer,ForeignKey('users.id'),primary_key=True)
+    access_type=Column(String(10),nullable=False)
+    updated_by=Column(Integer,ForeignKey('users.id'))
+    updated_at=Column(DateTime,server_default=func.now(),onupdate=func.now())

@@ -87,7 +87,8 @@ def profile(user_id:int,request:Request):
         u=db.get(User,user_id);p=db.get(EmployeeProfile,user_id)
         if not u:return HTMLResponse('Employee not found',404)
         inputs=''.join(f'<label>{key.replace("_"," ").title()}<input name="{key}" maxlength="{limit}" type="{"date" if key=="joining_date" else "text"}" value="{escape(str(getattr(p,key) or "") if p else "",quote=True)}"></label>' for key,limit in FIELDS.items())
-        return page('Employee Details',f'<h2>{escape(u.full_name)}</h2><p>{escape(u.email)} · {escape(u.role)}</p><form method="post">{hidden(request)}{inputs}<button>Save Details</button></form>')
+        access_link=f'<p><a href="/command-center/access/{user_id}">Access / Reset Device / Reset Password</a></p>' if request.session.get('role')=='SUPER_ADMIN' else ''
+        return page('Employee Details',access_link+f'<h2>{escape(u.full_name)}</h2><p>{escape(u.email)} · {escape(u.role)}</p><form method="post">{hidden(request)}{inputs}<button>Save Details</button></form>')
 
 @router.post('/employees/{user_id}')
 async def save_profile(user_id:int,request:Request):

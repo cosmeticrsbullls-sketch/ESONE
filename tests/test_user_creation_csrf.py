@@ -27,7 +27,7 @@ class UserCreationCsrfTests(unittest.TestCase):
 
     def payload(self, **extra):
         return dict(full_name='CSRF Test Employee', email='csrf-employee@example.test',
-                    password='Test-only-password-123', role='SALES', **extra)
+                    password='Test-only-password-123', role='SALES', access_type='BOTH', **extra)
 
     def assert_no_employee(self):
         with SessionLocal() as db:

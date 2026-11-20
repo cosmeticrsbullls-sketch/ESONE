@@ -1,5 +1,5 @@
 from database.db import SessionLocal
-from database.models import User
+from database.models import User,UserAccessPolicy
 from modules.security import hash_password
 
 
@@ -11,7 +11,7 @@ VALID_ROLES = {
 }
 
 
-def create_user(full_name, email, password, role):
+def create_user(full_name, email, password, role, access_type="BOTH"):
 
     full_name = full_name.strip()
     email = email.strip().lower()
@@ -32,6 +32,8 @@ def create_user(full_name, email, password, role):
     if role not in VALID_ROLES:
         return False, "Invalid ESONE role."
 
+    if access_type not in {'MOBILE','WEB','BOTH'} or role=='SUPER_ADMIN' and access_type!='BOTH':
+        return False, "Choose Mobile Only, Computer/Web Only, or Both. Super Admin requires Both."
     db = SessionLocal()
 
     try:
@@ -54,6 +56,8 @@ def create_user(full_name, email, password, role):
         )
 
         db.add(user)
+        db.flush()
+        db.add(UserAccessPolicy(user_id=user.id,access_type=access_type))
         db.commit()
 
         return True, "ESONE user created successfully."

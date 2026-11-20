@@ -1,10 +1,10 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../modules/permissions.js'),'utf8');
 const flush=()=>new Promise(r=>setImmediate(r));
-function setup({denyCamera=false,denyLocation=false,supported=true,geo='prompt',camera='prompt'}={}){
+function setup({denyCamera=false,denyLocation=false,supported=true,geo='prompt',camera='prompt',fieldRequired=true}={}){
  const nodes={},store=new Map(),requests=[];let cameraCalls=0,locationCalls=0,notificationCalls=0,stopped=0,destination;
  const node=id=>nodes[id]??={hidden:false,disabled:false,handlers:{},addEventListener(e,f){this.handlers[e]=f}};
- const box=node('permission-setup');box.dataset={device:'2:5',key:'AAAA'};box.querySelector=()=>({value:'csrf'});
+ const box=node('permission-setup');box.dataset={device:'2:5',key:'AAAA',fieldRequired:String(fieldRequired)};box.querySelector=()=>({value:'csrf'});
  const subscription={toJSON:()=>({endpoint:'https://fcm.googleapis.com/test',keys:{p256dh:'fake',auth:'fake'}}),unsubscribe:async()=>true};
  const registration={pushManager:{getSubscription:async()=>null,subscribe:async()=>subscription}};
  const Notification={permission:'default',requestPermission:async()=>{notificationCalls++;Notification.permission='granted';return 'granted'}};
@@ -20,5 +20,6 @@ function setup({denyCamera=false,denyLocation=false,supported=true,geo='prompt',
  t=setup({denyCamera:true,denyLocation:true});await flush();t.click('allow-location');await t.click('allow-camera');t.click('skip-notifications');assert.equal(t.node('setup-continue').disabled,true);assert.equal(t.stopped,0);assert.match(t.node('camera-status').textContent,/unavailable/);
  t=setup();await flush();await t.click('allow-notifications');assert.equal(t.notificationCalls,1);assert.equal(t.requests[0].path,'/push/subscribe');assert.equal(t.requests[0].body.csrf,'csrf');assert.equal(t.node('test-notification').hidden,false);await t.click('test-notification');assert.equal(t.requests[1].path,'/push/test');await t.click('disable-notifications');assert.equal(t.requests[2].path,'/push/unsubscribe');assert.equal(t.node('test-notification').hidden,true);
  t=setup({supported:false});await flush();await t.click('allow-notifications');assert.equal(t.notificationCalls,0);assert.match(t.node('notification-status').textContent,/Home Screen/);
+ t=setup({fieldRequired:false});await flush();t.click('skip-notifications');assert.equal(t.node('setup-continue').disabled,false);assert.equal(t.locationCalls,0);assert.equal(t.cameraCalls,0);
  console.log('PASS first-login user gestures, no automatic permission prompts, required gating, camera track cleanup, denied permissions, optional notifications, authenticated subscription/test/off, and iPhone unsupported guidance');
 })().catch(e=>{console.error(e);process.exitCode=1});

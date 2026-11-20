@@ -1,10 +1,11 @@
 (() => {
  const box=document.getElementById('permission-setup');if(!box)return;
  const status=name=>document.getElementById(name+'-status'),message=document.getElementById('setup-message'),next=document.getElementById('setup-continue');
+ const fieldRequired=box.dataset.fieldRequired!=='false';
  const identity=box.dataset.device,key='esone-permissions:'+identity;let memory={};try{memory=JSON.parse(localStorage.getItem(key)||'{}')}catch(_){}
  let locationReady=false,cameraReady=false,notificationReady=false,registration;
  function save(){try{localStorage.setItem(key,JSON.stringify(memory))}catch(_){}}
- function update(){next.disabled=!(locationReady&&cameraReady&&(notificationReady||memory.skipNotifications));}
+ function update(){next.disabled=!((!fieldRequired||locationReady&&cameraReady)&&(notificationReady||memory.skipNotifications));}
  async function state(name){try{return (await navigator.permissions.query({name})).state}catch(_){return 'unknown'}}
  async function post(path,data={}){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csrf:box.querySelector('[name=csrf]').value,...data})});if(!response.ok||response.redirected)throw Error('Could not save notification setup. Sign in on an approved browser and retry.');return response.json();}
  function supported(){return 'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;}
@@ -39,7 +40,7 @@
  next.addEventListener('click',()=>{if(!next.disabled)location.assign('/workspace');});
  async function check(){
   document.getElementById('push-install').hidden=supported();
-  const geo=await state('geolocation'),camera=await state('camera');
+  const geo=fieldRequired?await state('geolocation'):'not-needed',camera=fieldRequired?await state('camera'):'not-needed';
   locationReady=geo==='granted'||geo==='unknown'&&memory.location===true;cameraReady=camera==='granted'||camera==='unknown'&&memory.camera===true;
   status('location').textContent=geo==='granted'?'✅ Location allowed':locationReady?'Previously checked — browser cannot confirm permission.':'Permission needed';
   status('camera').textContent=camera==='granted'?'✅ Camera allowed':cameraReady?'Previously checked — browser cannot confirm permission.':'Permission needed';
