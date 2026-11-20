@@ -1,9 +1,21 @@
 import unittest
+from unittest.mock import patch
+import re
 from html.parser import HTMLParser
 from modules.button_icons import action_key,decorate_controls,svg,PATHS,CSS
 from modules.ui import enhance,icon
 
 class ButtonIconTests(unittest.TestCase):
+    def test_stylesheet_cache_key_changes_with_content(self):
+        source='<html><head></head><body></body></html>'
+        def stylesheet():
+            return re.search(r'/assets/esone\.css\?v=([a-f0-9]+)',enhance(source,'/login')).group(1)
+        original=stylesheet()
+        self.assertEqual(original,stylesheet())
+        with patch('modules.ui.CSS', 'different stylesheet'):
+            self.assertNotEqual(original,stylesheet())
+
+
     def test_action_meanings(self):
         for label,key in [('Sales','sales'),('Collection','collection'),('Demo','demo'),('Book Order','order'),('Punch In','in'),('Punch Out','out'),('Share','share'),('Download PDF','download'),('Save Client','save'),('Edit educator','edit'),('Delete','delete'),('Search','search'),('Import bills and previous collections','add')]:
             with self.subTest(label=label):self.assertEqual(action_key(label),key)
@@ -35,7 +47,7 @@ class ButtonIconTests(unittest.TestCase):
             html='<html><head></head><body><main><button>'+label+'</button></main></body></html>'
             rendered=enhance(html,path,signed_in=signed_in)
             self.assertIn('data-action-icon="'+('out' if signed_in else 'in')+'"',rendered)
-            self.assertIn('esone.css?v=7',rendered)
+            self.assertRegex(rendered,r'esone\.css\?v=[a-f0-9]{16}')
 
     def test_svg_assets_are_valid_and_duotone(self):
         from xml.etree import ElementTree
