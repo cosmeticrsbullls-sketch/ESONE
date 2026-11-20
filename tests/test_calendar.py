@@ -42,7 +42,7 @@ class CalendarTests(unittest.TestCase):
         self.assertIn('>Submit</button>',response.text)
         self.assertIn('Change date',response.text)
         self.assertNotIn('calendar-grid',response.text)
-        self.assertIn('value="1" selected>',response.text)
+        self.assertIn('name="client_id" value="1"',response.text)
         self.assertIn('value="2" selected>Sales A',response.text)
 
     def test_booking_calendar_rejects_past_dates_and_invalid_month(self):
@@ -51,6 +51,18 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(self.client.get('/demos/new?month=invalid').status_code,400)
         self.assertEqual(self.client.get('/demos/new?demo_day=2028-02-30').status_code,422)
         self.assertEqual(self.client.get('/demos/new?educator_id=999').status_code,400)
+
+    def test_demo_has_one_business_box_and_conditional_other_educator(self):
+        self.login()
+        text=self.client.get('/demos/new?demo_day=2028-02-29').text
+        self.assertIn('data-business-picker',text)
+        self.assertIn('<datalist id="demo-businesses">',text)
+        self.assertNotIn('aria-label="Salon"',text)
+        self.assertNotIn('Optional registered educator',text)
+        self.assertIn('<option value="0">Other educator</option>',text)
+        self.assertIn('data-other-educator hidden',text)
+        self.assertIn('name="educator_name" disabled',text)
+        self.assertIn('/assets/demo-picker.js',text)
 
     def test_calendar_highlights_dates_and_filters_educator(self):
         self.login();self.seed_demos()
@@ -71,7 +83,7 @@ class CalendarTests(unittest.TestCase):
         response=self.client.get('/demos/new?demo_day=2028-02-29&educator_id=2&client_id=1')
         self.assertIn('value="2028-02-29T10:00"',response.text)
         self.assertIn('value="2" selected>Sales A',response.text)
-        self.assertIn('value="1" selected>',response.text)
+        self.assertIn('name="client_id" value="1"',response.text)
 
     def test_calendar_invalid_dates_permissions_and_nonmutating_reads(self):
         self.login()
@@ -89,7 +101,8 @@ class CalendarTests(unittest.TestCase):
         response=self.client.get('/demos/new?demo_day=2028-02-29')
         self.assertIn('No businesses registered',response.text);self.assertIn('Add Business on Home',response.text)
         self.assertIn('Search business / mobile',response.text)
-        self.assertIn('name="client_id" required',response.text)
+        self.assertIn('name="client_id"',response.text)
+        self.assertIn('name="business_label"',response.text)
         self.assertIn('id="new-salon"',self.client.get('/clients').text)
 
     def test_register_salon_returns_to_booking_safely(self):
