@@ -140,6 +140,8 @@ class TeamOrderTests(unittest.TestCase):
         self.assertIn('id="date-bookings"',details)
         self.assertIn('/demo-availability?day=',details)
         edit=self.form(url);edit.update(educator_name='Edited Educator')
+        self.assertEqual(self.client.post(url+'/educator',data=edit).status_code,403)
+        self.login();edit=self.form(url);edit.update(educator_name='Edited Educator')
         self.assertEqual(self.client.post(url+'/educator',data=edit,follow_redirects=False).status_code,303)
         self.assertIn('Edited Educator',self.client.get(url).text)
         self.client.get('/logout');self.login('b');self.assertEqual(self.client.get(url).status_code,403)

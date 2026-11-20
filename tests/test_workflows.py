@@ -93,6 +93,7 @@ class WorkflowTests(unittest.TestCase):
         response=self.client.post('/demos',data=data,follow_redirects=False)
         self.assertEqual(response.status_code,303);url=response.headers['location']
         self.assertEqual(self.client.post('/demos',data=data).status_code,409)
+        self.login('a')
         transition=self.form(url);transition.update(action='COMPLETE',result='CONVERTED',notes='Done')
         self.assertEqual(self.client.post(url,data=transition).status_code,409)
         transition['action']='START';self.assertEqual(self.client.post(url,data=transition,follow_redirects=False).status_code,303)
@@ -106,6 +107,7 @@ class WorkflowTests(unittest.TestCase):
         with SessionLocal() as db:
             d=db.query(DemoBooking).one();self.assertEqual(d.started_at,started);self.assertEqual(d.conversion_status,'NOT_CONVERTED');self.assertEqual(db.get(Activity,d.activity_id).status,'COMPLETED')
         self.assertNotIn('<script>reason</script>',self.client.get(url).text)
+        self.login()
         self.assertEqual(len(self.workbook(self.client.get('/reports/export?kind=demos'))),2)
         self.assertEqual(len(self.workbook(self.client.get('/reports/export?kind=demos&q=nonexistent'))),1)
 
@@ -126,7 +128,7 @@ class WorkflowTests(unittest.TestCase):
         response=self.client.post('/demos',data=data,follow_redirects=False);url=response.headers['location']
         t=self.form(url);t.update(action='CANCEL',notes='Customer cancelled')
         self.assertEqual(self.client.post(url,data=t,follow_redirects=False).status_code,303)
-        self.assertEqual(self.client.post(url,data={**t,'action':'START'}).status_code,409)
+        self.assertEqual(self.client.post(url,data={**t,'action':'START'}).status_code,403)
         self.assertEqual(self.client.get('/demos/999').status_code,404)
 
 # Keep discovery from re-running the imported fixture class.

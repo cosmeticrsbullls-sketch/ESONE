@@ -13,6 +13,15 @@ class FieldIntakeTests(unittest.TestCase):
     def login(self,who='a'):
         self.punch_in_for_test(1,2,3);self._base_login(who)
 
+    def test_visit_screen_has_one_heading_and_no_repeated_instructions(self):
+        self.login()
+        html=self.client.get('/field/intake').text
+        self.assertEqual(html.count('>Add Visit<'),1)
+        self.assertNotIn('class="card field-intake"',html)
+        self.assertNotIn('Business missing?',html)
+        self.assertIn('data-unified-business',html)
+        self.assertIn('id="business-search"',html)
+
     def test_workspace_links_and_single_form_collection_visit(self):
         self.assertEqual(self.client.get('/field/intake',follow_redirects=False).headers['location'],'/login')
         self.login()
@@ -42,7 +51,7 @@ class FieldIntakeTests(unittest.TestCase):
     def test_missing_business_redirects_employee_to_add_business_not_inline_form(self):
         self.login()
         html=self.client.get('/field/intake').text
-        self.assertIn('Add Business on Home',html);self.assertNotIn('name="business_name"',html)
+        self.assertIn('Add Business on Home',self.client.get('/assets/business-picker.js').text);self.assertNotIn('name="business_name"',html)
         data=photo_form(self);data['client_id']=''
         response=self.client.post('/field/start',data={**data,'business_name':'No inline','phone':'999'})
         self.assertEqual(response.status_code,400)

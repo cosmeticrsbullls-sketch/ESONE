@@ -18,6 +18,14 @@ router = APIRouter()
 MANAGEMENT = {'SUPER_ADMIN', 'MANAGEMENT', 'OFFICE'}
 ZONE = ZoneInfo('Asia/Kolkata')
 
+def india_time(value):
+    if value is None:
+        return '—'
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(ZONE).strftime('%d %b %Y, %I:%M:%S %p IST')
+
+
 def utc_boundary(day):
     return datetime.combine(day, time.min, ZONE).astimezone(timezone.utc).replace(tzinfo=None)
 
@@ -121,7 +129,7 @@ def activity_share(activity_id:int,request:Request):
         evidence=db.query(VisitPhoto).filter_by(activity_id=a.id).first()
         content=f'<h2>{escape(a.activity_type)} · {escape(c.business_name if c else "")}</h2><p>{escape(a.status)}</p><p>{escape(a.notes or "")}</p>'
         if evidence:
-            content+=f'<h3>Salon photo</h3><p>Recorded (UTC): {evidence.received_at} · GPS accuracy: {evidence.accuracy:.0f} m · Device #{evidence.device_id}</p><a href="/activities/{a.id}/photo" target="_blank" rel="noopener"><img src="/activities/{a.id}/photo" alt="Salon visit photo" style="max-width:480px;width:100%"></a>'
+            content+=f'<h3>Salon photo</h3><p>Recorded (IST): {india_time(evidence.received_at)} · GPS accuracy: {evidence.accuracy:.0f} m · Device #{evidence.device_id}</p><a href="/activities/{a.id}/photo" target="_blank" rel="noopener"><img src="/activities/{a.id}/photo" alt="Salon visit photo" style="max-width:480px;width:100%"></a>'
     return page('Activity Details / Share',content+share_button(f'/activities/{activity_id}/pdf',f'ESONE_activity_{activity_id}.pdf')+SHARE_SCRIPT)
 
 @router.get('/activities/{activity_id}/pdf')

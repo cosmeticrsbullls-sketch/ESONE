@@ -85,7 +85,13 @@ class DeviceCameraTests(unittest.TestCase):
             self.assertIsNotNone(db.query(VisitCameraChallenge).one().used_at)
         self.assertIn('Visit recorded successfully',self.client.get('/workspace').text)
         self.assertIn('View salon photo',self.client.get(f'/visits/{aid}').text)
-        self.assertIn('Salon photo',self.client.get(f'/activities/{aid}/share').text)
+        with SessionLocal.begin() as db:
+            db.query(VisitPhoto).one().received_at=datetime(2026,11,20,10,37,39,674993)
+        shared=self.client.get(f'/activities/{aid}/share').text
+        self.assertIn('Recorded (IST): 20 Nov 2026, 04:07:39 PM IST',shared)
+        self.assertNotIn('Recorded (UTC)',shared)
+        with SessionLocal() as db:
+            self.assertEqual(db.query(VisitPhoto).one().received_at,datetime(2026,11,20,10,37,39,674993))
         image=self.client.get(f'/activities/{aid}/photo');self.assertEqual(image.status_code,200)
         self.assertIn('no-store',image.headers['cache-control'])
         self.login('b');self.assertEqual(self.client.get(f'/activities/{aid}/photo').status_code,404)

@@ -93,6 +93,36 @@ class DutyGateTests(unittest.TestCase):
         self.assertEqual(self.client.post('/salons/new',data=dict(csrf=self.csrf,business_name='Office Salon',phone='444'),follow_redirects=False).status_code,303)
         self.assertNotIn('<fieldset disabled',self.client.get('/orders/new').text)
 
+    def test_demo_execution_matches_registered_or_external_educator(self):
+        self.login('a');self.duty(2,3)
+        url=self.demo(creator=2,assignee=3)
+        self.assertNotIn('Start Demo',self.client.get(url).text)
+        self.assertNotIn('Update educator',self.client.get(url).text)
+        self.assertEqual(self.client.post(url,data=dict(csrf=self.csrf,action='START',notes='Not educator')).status_code,403)
+        self.assertEqual(self.client.post(url+'/educator',data=dict(csrf=self.csrf,educator_id=0,educator_name='Bypass')).status_code,403)
+        self.login('b')
+        self.assertIn('Start Demo',self.client.get(url).text)
+        self.assertEqual(self.client.post(url,data=dict(csrf=self.csrf,action='START',notes='Educator start'),follow_redirects=False).status_code,303)
+        self.login('a')
+        self.assertEqual(self.client.post(url,data=dict(csrf=self.csrf,action='COMPLETE',result='CONVERTED',notes='Not educator')).status_code,403)
+        self.login('b')
+        self.assertEqual(self.client.post(url,data=dict(csrf=self.csrf,action='COMPLETE',result='CONVERTED',notes='Educator complete'),follow_redirects=False).status_code,303)
+        external=self.demo(creator=2,assignee=None)
+        self.login('a')
+        self.assertIn('Start Demo',self.client.get(external).text)
+        self.assertEqual(self.client.post(external,data=dict(csrf=self.csrf,action='START',notes='External educator start'),follow_redirects=False).status_code,303)
+        self.assertEqual(self.client.post(external,data=dict(csrf=self.csrf,action='COMPLETE',result='CONVERTED',notes='External educator complete'),follow_redirects=False).status_code,303)
+
+    def test_command_center_reassignment_changes_executor(self):
+        self.login();self.duty(1,2,3)
+        url=self.demo(creator=2,assignee=3)
+        self.assertEqual(self.client.post(url+'/educator',data=dict(csrf=self.csrf,educator_id=0,educator_name='External'),follow_redirects=False).status_code,303)
+        self.login('b');self.assertEqual(self.client.get(url).status_code,403)
+        self.login('a');self.assertIn('Start Demo',self.client.get(url).text)
+        self.login();self.assertEqual(self.client.post(url+'/educator',data=dict(csrf=self.csrf,educator_id=3),follow_redirects=False).status_code,303)
+        self.login('a');self.assertNotIn('Start Demo',self.client.get(url).text)
+        self.login('b');self.assertIn('Start Demo',self.client.get(url).text)
+
     def test_demo_requires_duty_and_blocks_punch_out_until_complete(self):
         self.login('a');url=self.demo();data=dict(csrf=self.csrf,action='START',notes='QA start')
         self.assertEqual(self.client.post(url,data=data).status_code,409)
@@ -109,7 +139,8 @@ class DutyGateTests(unittest.TestCase):
     def test_assigned_educator_must_be_on_duty_for_admin_start(self):
         self.login();self.duty(1);url=self.demo(creator=1,assignee=2)
         response=self.client.post(url,data=dict(csrf=self.csrf,action='START',notes='Admin start'))
-        self.assertEqual(response.status_code,409);self.assertIn('educator must Punch In',response.text)
+        self.assertEqual(response.status_code,403)
+        self.login('a')
         self.duty(2);self.assertEqual(self.client.post(url,data=dict(csrf=self.csrf,action='START',notes='Admin start'),follow_redirects=False).status_code,303)
 
     def test_other_employee_activity_and_completed_work_do_not_block_punch_out(self):
