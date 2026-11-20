@@ -41,13 +41,15 @@ def enroll(db, request, user):
     device = db.query(EmployeeDevice).filter_by(user_id=user.id, token_hash=digest(raw)).first()
     if device is None:
         root = user.role == 'SUPER_ADMIN'
-        if root:
-            for old in db.query(EmployeeDevice).filter_by(user_id=user.id, status='APPROVED').all():
-                old.status = 'REVOKED'
-                db.add(AuditLog(user_id=user.id,entity_type='EmployeeDevice',entity_id=old.id,action='DEVICE_REVOKE',new_value='Super Admin bootstrap on replacement browser'))
         device = EmployeeDevice(user_id=user.id, token_hash=digest(raw), status='APPROVED' if root else 'PENDING', label=request.headers.get('user-agent', 'Browser')[:250], created_at=utc_now(), reviewed_at=utc_now() if root else None, reviewed_by=user.id if root else None)
         db.add(device); db.flush()
         db.add(AuditLog(user_id=user.id, entity_type='EmployeeDevice', entity_id=device.id, action='DEVICE_BOOTSTRAP' if root else 'DEVICE_REQUEST', new_value=device.status))
+    elif user.role == 'SUPER_ADMIN' and device.status == 'REVOKED':
+        last_revoke = db.query(AuditLog).filter_by(entity_type='EmployeeDevice', entity_id=device.id, action='DEVICE_REVOKE').order_by(AuditLog.id.desc()).first()
+        if last_revoke and last_revoke.new_value == 'Super Admin bootstrap on replacement browser':
+            device.status = 'APPROVED'
+            device.reviewed_at = utc_now(); device.reviewed_by = user.id
+            db.add(AuditLog(user_id=user.id, entity_type='EmployeeDevice', entity_id=device.id, action='DEVICE_BOOTSTRAP', new_value='Restored previous Super Admin browser'))
     return device, raw
 
 
@@ -63,7 +65,7 @@ def access_page(request: Request):
     with SessionLocal.begin() as db:
         user = db.query(User).filter_by(id=request.session['user_id']).with_for_update().one()
         device, raw = enroll(db, request, user)
-        body = f'<h2>Device approval</h2><p>Request #{device.id} · <strong>{escape(device.status)}</strong></p><p>Browser: {escape(device.label)}</p><p>New browsers require Command Center approval. Approval of a replacement revokes the previous browser.</p>'
+        body = f'<h2>Device approval</h2><p>Request #{device.id} · <strong>{escape(device.status)}</strong></p><p>Browser: {escape(device.label)}</p><p>New browsers require Command Center approval. Super Admin may use multiple browsers. For other users, approval of a replacement revokes the previous browser.</p>'
         if device.status == 'APPROVED':
             body += '<a href="/workspace">Continue to ESONE</a>'
         else:
@@ -106,7 +108,7 @@ def review_page(request: Request):
                 for action in choices:
                     actions += f'<form method="post" action="/command-center/devices/{device.id}">{hidden(request)}<input type="hidden" name="decision" value="{action}"><button>{action.title()}</button></form>'
             rows.append(f'<tr><td>#{device.id} {escape(user.full_name)}</td><td>{escape(device.label)}</td><td>{escape(device.status)}</td><td>{device.created_at}</td><td>{actions}</td></tr>')
-    return HTMLResponse(page('Device approvals','<h2>Device approvals</h2><p>Verify the employee before approving. Approving a replacement immediately revokes their other browser. You cannot approve your own request. Super Admin bootstrap access is recorded in the audit log.</p><table><tr><th>Employee</th><th>Browser</th><th>Status</th><th>Requested (UTC)</th><th>Review</th></tr>'+''.join(rows)+'</table>'))
+    return HTMLResponse(page('Device approvals','<h2>Device approvals</h2><p>Verify the employee before approving. For non-Super-Admin users, approving a replacement immediately revokes their other browser. Super Admin may use multiple approved browsers. You cannot approve your own request. Super Admin bootstrap access is recorded in the audit log.</p><table><tr><th>Employee</th><th>Browser</th><th>Status</th><th>Requested (UTC)</th><th>Review</th></tr>'+''.join(rows)+'</table>'))
 
 
 @router.post('/command-center/devices/{device_id}')
@@ -122,7 +124,7 @@ def review(device_id:int, request:Request, decision:str=Form(''), csrf:str=Form(
         db.refresh(item)
         if item.user_id == request.session['user_id']: raise HTTPException(403,'Another Command Center user must review your request')
         if decision in {'APPROVE','REJECT'} and item.status == 'PENDING':
-            if decision == 'APPROVE':
+            if decision == 'APPROVE' and db.get(User,item.user_id).role != 'SUPER_ADMIN':
                 for old in db.query(EmployeeDevice).filter_by(user_id=item.user_id,status='APPROVED').all():
                     old.status='REVOKED'
                     db.add(AuditLog(user_id=request.session['user_id'],entity_type='EmployeeDevice',entity_id=old.id,action='DEVICE_REVOKE',new_value='replacement approved'))
