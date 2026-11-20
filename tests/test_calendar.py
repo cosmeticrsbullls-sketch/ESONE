@@ -66,6 +66,50 @@ class CalendarTests(unittest.TestCase):
         self.assertIn('name="educator_name" disabled',text)
         self.assertIn('/assets/demo-picker.js',text)
 
+    def seed_requests(self):
+        from database.models import DemoBookingRequest
+        with SessionLocal.begin() as db:
+            for uid in [2,3]:
+                for state in ['PENDING','REJECTED']:
+                    db.add(DemoBookingRequest(requested_by=uid,source='SALES',client_id=1,treatment='Private '+str(uid)+' '+state,demo_date=datetime(2028,2,29,12),educator_id=uid,educator_name='Educator '+str(uid),notes='Request',status=state,review_reason='Private reason '+str(uid) if state=='REJECTED' else None))
+
+    def test_calendar_only_has_status_markers_and_no_forms(self):
+        self.login();self.seed_demos();self.seed_requests()
+        text=self.client.get('/demos?month=2028-02').text
+        for label in ['🟢 Booked','🟠 Approval Pending','🔴 Rejected']:self.assertIn(label,text)
+        self.assertIn('data-pending-count="2" data-rejected-count="2"',text)
+        self.assertIn('data-date="2028-02-29" data-demo-count="2"',text)
+        self.assertNotIn('<form',text)
+        self.assertNotIn('Gold dates',text)
+        self.assertNotIn('name="treatment"',text)
+        self.assertIn('Private reason 2',text);self.assertIn('Private reason 3',text)
+
+    def test_employee_request_counts_and_reasons_are_private(self):
+        self.login('a');self.seed_requests()
+        for prefix in ['/demos?month=2028-02','/demos/new?month=2028-02']:
+            text=self.client.get(prefix).text
+            self.assertIn('data-pending-count="1" data-rejected-count="1"',text)
+            self.assertNotIn('data-pending-count="2"',text)
+            self.assertNotIn('Private 3',text)
+            self.assertNotIn('Private reason 3',text)
+        text=self.client.get('/demos?month=2028-02').text
+        self.assertIn('Private 2 PENDING',text);self.assertIn('Private reason 2',text)
+        self.client.get('/logout');self.login('b')
+        text=self.client.get('/demos?month=2028-02').text
+        self.assertIn('Private reason 3',text);self.assertNotIn('Private reason 2',text)
+
+    def test_reviewed_request_moves_from_pending_to_one_booked_marker(self):
+        from database.models import DemoBookingRequest
+        self.login();self.seed_requests()
+        with SessionLocal.begin() as db:
+            item=db.query(DemoBookingRequest).filter_by(requested_by=2,status='PENDING').one()
+            item.status='APPROVED'
+            activity=Activity(client_id=1,activity_type='DEMO',status='BOOKED',created_by=2)
+            db.add(activity);db.flush()
+            db.add(DemoBooking(activity_id=activity.id,demo_date=item.demo_date,assigned_educator_id=2))
+        text=self.client.get('/demos?month=2028-02').text
+        self.assertIn('data-date="2028-02-29" data-demo-count="1" data-pending-count="1" data-rejected-count="2"',text)
+
     def test_calendar_highlights_dates_and_filters_educator(self):
         self.login();self.seed_demos()
         response=self.client.get('/demos?month=2028-02')
@@ -81,7 +125,8 @@ class CalendarTests(unittest.TestCase):
         self.login();self.seed_demos()
         response=self.client.get('/demos?month=2028-02&day=2028-02-29&educator_id=2')
         self.assertIn('#10</a>',response.text);self.assertNotIn('#12</a>',response.text)
-        self.assertIn('demo_day=2028-02-29',response.text)
+        self.assertIn('data-date="2028-02-29"',response.text)
+        self.assertNotIn('id="demo-booking"',response.text)
         response=self.client.get('/demos/new?demo_day=2028-02-29&educator_id=2&client_id=1')
         self.assertIn('value="2028-02-29T10:00"',response.text)
         self.assertIn('value="2" selected>Sales A',response.text)

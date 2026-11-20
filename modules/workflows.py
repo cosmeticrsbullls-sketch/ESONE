@@ -186,9 +186,9 @@ def demos(request:Request,status:str='',q:str='',month:str='',educator_id:int=0,
     if denied is not None:return denied
     from modules.demo_calendar import calendar_view
     with SessionLocal() as db:
-        try:content=calendar_view(db,month,educator_id,day,q,status)
+        try:content=calendar_view(db,month,educator_id,day,q,status,viewer_id=request.session['user_id'],can_review=request.session['role'] in OFFICE_ROLES)
         except ValueError as error:return HTMLResponse(escape(str(error)),400)
-    return page('Demo Bookings',content)
+    return page('Demo Calendar',content)
 
 @router.get('/demos/new',response_class=HTMLResponse)
 def demo_form(request:Request, client_id:int=0, demo_day:date|None=None, educator_id:int=0, month:str=""):
@@ -197,7 +197,7 @@ def demo_form(request:Request, client_id:int=0, demo_day:date|None=None, educato
     with SessionLocal() as db:
         from modules.demo_calendar import calendar_view
         if demo_day is None:
-            try: calendar=calendar_view(db,month=month,educator_id=educator_id,booking=True,client_id=client_id)
+            try: calendar=calendar_view(db,month=month,educator_id=educator_id,booking=True,client_id=client_id,viewer_id=request.session['user_id'],can_review=request.session['role'] in OFFICE_ROLES)
             except ValueError as error:return HTMLResponse(escape(str(error)),400)
             return page('Book Demo',calendar)
         if demo_day<business_today():return HTMLResponse('Choose today or a future demo date.',400)
