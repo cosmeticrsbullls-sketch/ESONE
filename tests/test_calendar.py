@@ -56,6 +56,8 @@ class CalendarTests(unittest.TestCase):
         self.login()
         text=self.client.get('/demos/new?demo_day=2028-02-29').text
         self.assertIn('data-business-picker',text)
+        self.assertIn('data-business-results role="listbox"',text)
+        self.assertNotIn('list="demo-businesses"',text)
         self.assertIn('<datalist id="demo-businesses">',text)
         self.assertNotIn('aria-label="Salon"',text)
         self.assertNotIn('Optional registered educator',text)
